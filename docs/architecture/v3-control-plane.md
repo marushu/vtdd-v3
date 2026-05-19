@@ -35,6 +35,14 @@ Execution record:
 - `/orchestrator`: 複数 repo の work inbox。
 - `/progress/:executionId`: 単一 execution の waiting room。
 - `/decisions`: merge / deploy / close / retry queue。
+- `/repositories/:owner/:repo/chats`: repository ごとの開発チャット一覧。
+- `/chats/:chatId`: execution / Issue / PR に紐づく開発チャット。
+
+## Samidare Backlog
+
+五月雨で出た追加構想は `docs/roadmap/samidare-backlog.md` に固定する。
+
+主な未実装 scope は #10 dashboard auth、#11 RAG adapter、#12 chat rollover、#13 Voice/Text Driven Development、#14 Butler intent router、#15 VPS 常駐 runner、#16 realtime 更新。
 
 ## Authority Boundary
 

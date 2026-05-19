@@ -17,10 +17,18 @@ VTDD v3 は、主作業面を ChatGPT thread history から離し、GitHub truth
 
 - `/` と `/orchestrator`: active work dashboard。
 - `/progress/:executionId`: 単一 execution の進捗ページ。
+- `/repositories/:owner/:repo/chats`: repository ごとの開発チャット。
+- `/chats/:chatId`: execution / Issue / PR に紐づく開発チャット。
 - `/api/executions`: execution list JSON。
 - `/api/executions/:executionId`: execution detail JSON。
 - `/api/runner/queue`: VPS runner 用 queue read。
 - `/api/runner/claim`: VPS runner 用 claim。
+
+## Roadmap
+
+五月雨で出た v3 構想の実装済み / 未実装一覧は `docs/roadmap/samidare-backlog.md` に固定する。
+
+直近の未実装は dashboard auth、RAG adapter、chat rollover、Voice/Text Driven Development、Butler intent router、VPS 常駐 runner、realtime 更新。
 
 ## Issue / PR 言語
 

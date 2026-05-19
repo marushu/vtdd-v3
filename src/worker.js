@@ -157,7 +157,14 @@ const issueCatalog = [
   { number: 6, title: "vtdd.hibou-web.com の Cloudflare 移行検討", status: "open" },
   { number: 7, title: "v3 GitHub App 権限と runner 認証情報", status: "planned" },
   { number: 8, title: "リポジトリ別の開発チャット", status: "open" },
-  { number: 9, title: "VPS Codex CLI の返事を開発チャットへ返す", status: "open" }
+  { number: 9, title: "VPS Codex CLI の返事を開発チャットへ返す", status: "open" },
+  { number: 10, title: "Dashboard を対象 GitHub アカウントだけに制限する", status: "planned" },
+  { number: 11, title: "既存 RAG に開発チャットを保存・検索できるようにする", status: "planned" },
+  { number: 12, title: "開発チャットの rollover / continuation", status: "planned" },
+  { number: 13, title: "Voice/Text Driven Development のマイク入力", status: "planned" },
+  { number: 14, title: "Butler intent router for dashboard chat", status: "planned" },
+  { number: 15, title: "VPS 常駐 runner と token gate", status: "planned" },
+  { number: 16, title: "chat / execution の realtime 更新", status: "planned" }
 ];
 
 export default {
