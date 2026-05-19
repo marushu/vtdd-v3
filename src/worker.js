@@ -1,4 +1,5 @@
 const EXECUTION_STORE_KEY = "vtdd:v3:executions";
+const CHAT_STORE_KEY = "vtdd:v3:chats";
 
 const allowedPhases = [
   "queued",
@@ -51,6 +52,8 @@ const forbiddenEventFields = [
 
 const allowedDispatchTaskTypes = ["implementation", "investigation", "docs", "tests", "review"];
 const forbiddenDispatchTaskTypes = ["merge", "deploy", "close_issue", "credential", "dns", "delete"];
+const allowedChatStatuses = ["active", "pinned", "archived", "cold"];
+const forbiddenChatFields = ["rawTranscript", "rawLog", "terminalStream", "chainOfThought", "secret", "token", "approvalGrant", "approvalGrantId", "password", "privateKey"];
 
 const sampleExecutions = [
   {
@@ -106,6 +109,45 @@ const sampleExecutions = [
   }
 ];
 
+const sampleChats = [
+  {
+    chatId: "chat-vtdd-v3-issue5-runner-pickup-20260519-001",
+    repository: "marushu/vtdd-v3",
+    issueNumber: 5,
+    prNumber: null,
+    executionId: "remote-codex-marushu-vtdd-v3-5-mpc98fda",
+    title: "VPS runner pickup adapter",
+    status: "active",
+    summary: "Dashboard dispatch から VPS runner が queue を拾えるようにする作業。dry-run runner は live 確認済み。",
+    lastMessage: "次は VPS 常駐化と runner token gate を別スライスで扱う。",
+    tags: ["runner", "dashboard", "queue"],
+    createdAt: "2026-05-19T06:45:00.000Z",
+    updatedAt: "2026-05-19T06:55:00.000Z",
+    messages: [
+      { role: "owner", text: "VPS Codex CLI が dashboard queue を拾えるようにしたい。", createdAt: "2026-05-19T06:45:00.000Z" },
+      { role: "butler", text: "dry-run runner で queue claim と progress 更新を確認済み。", createdAt: "2026-05-19T06:55:00.000Z" }
+    ]
+  },
+  {
+    chatId: "chat-vtdd-v2-p-issue424-deploy-guard-20260519-001",
+    repository: "marushu/vtdd-v2-p",
+    issueNumber: 424,
+    prNumber: 425,
+    executionId: "remote-codex-issue424-closed",
+    title: "deploy operator repositoryInput guard",
+    status: "archived",
+    summary: "deploy operator が repositoryInput なしで進めてしまう問題を修正し、PR #425 merge / deploy まで完了した。",
+    lastMessage: "残る確認は実機 Butler で repo が入ることと空 repo で進まないこと。",
+    tags: ["deploy", "guard", "closed"],
+    createdAt: "2026-05-19T04:20:00.000Z",
+    updatedAt: "2026-05-19T04:58:00.000Z",
+    messages: [
+      { role: "owner", text: "Issue 番号や PR 番号なしでも deploy できないの？", createdAt: "2026-05-19T04:20:00.000Z" },
+      { role: "butler", text: "repositoryInput guard を修正し、runtime 反映まで完了。", createdAt: "2026-05-19T04:58:00.000Z" }
+    ]
+  }
+];
+
 const issueCatalog = [
   { number: 1, title: "Epic: VTDD v3 Cloudflare オーケストレーターダッシュボード", status: "open" },
   { number: 2, title: "VPS Codex CLI 進捗イベント契約", status: "open" },
@@ -113,16 +155,33 @@ const issueCatalog = [
   { number: 4, title: "オーナー通知", status: "open" },
   { number: 5, title: "Dashboard から VPS Codex CLI へ開発を投げる", status: "open" },
   { number: 6, title: "vtdd.hibou-web.com の Cloudflare 移行検討", status: "open" },
-  { number: 7, title: "v3 GitHub App 権限と runner 認証情報", status: "planned" }
+  { number: 7, title: "v3 GitHub App 権限と runner 認証情報", status: "planned" },
+  { number: 8, title: "リポジトリ別の開発チャット", status: "open" }
 ];
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const executions = await listExecutions(env);
+    const chats = await listChats(env);
 
     if (url.pathname === "/" || url.pathname === "/orchestrator") {
-      return html(renderDashboard({ executions, env, url }));
+      return html(renderDashboard({ executions, chats, env, url }));
+    }
+
+    const repositoryChatsMatch = url.pathname.match(/^\/repositories\/([^/]+)\/([^/]+)\/chats$/);
+    if (repositoryChatsMatch) {
+      const repository = `${decodeURIComponent(repositoryChatsMatch[1])}/${decodeURIComponent(repositoryChatsMatch[2])}`;
+      return html(renderRepositoryChats({ repository, chats, executions }));
+    }
+
+    if (url.pathname.startsWith("/chats/")) {
+      const chatId = decodeURIComponent(url.pathname.slice("/chats/".length));
+      const chat = chats.find((item) => item.chatId === chatId);
+      if (!chat) {
+        return json({ ok: false, error: "chat_not_found", chatId }, 404);
+      }
+      return html(renderChatDetail({ chat, executions }));
     }
 
     if (url.pathname === "/decisions") {
@@ -165,6 +224,33 @@ export default {
 
     if (url.pathname === "/api/notifications") {
       return json({ ok: true, notifications: buildNotifications(executions) });
+    }
+
+    if (url.pathname === "/api/chats" && request.method === "GET") {
+      const repository = normalizeText(url.searchParams.get("repository"));
+      const filtered = repository ? chats.filter((chat) => chat.repository === repository) : chats;
+      return json({ ok: true, chats: filtered });
+    }
+
+    if (url.pathname === "/api/chats" && request.method === "POST") {
+      const body = await readBody(request);
+      const validation = validateChatInput(body);
+      if (!validation.ok) {
+        return json(validation, 400);
+      }
+      const chat = buildChatRecord(body);
+      chats.unshift(chat);
+      await saveChats(env, chats);
+      return json({ ok: true, chat, chatUrl: `/chats/${encodeURIComponent(chat.chatId)}` }, 201);
+    }
+
+    if (url.pathname.startsWith("/api/chats/")) {
+      const chatId = decodeURIComponent(url.pathname.slice("/api/chats/".length));
+      const chat = chats.find((item) => item.chatId === chatId);
+      if (!chat) {
+        return json({ ok: false, error: "chat_not_found", chatId }, 404);
+      }
+      return json({ ok: true, chat });
     }
 
     if (url.pathname === "/api/event-contract") {
@@ -292,6 +378,36 @@ async function saveExecutions(env, executions) {
   return true;
 }
 
+async function listChats(env) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) {
+    return sampleChats.map((chat) => normalizeChat(chat));
+  }
+
+  const raw = await store.get(CHAT_STORE_KEY);
+  if (!raw) {
+    return sampleChats.map((chat) => normalizeChat(chat));
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((chat) => normalizeChat(chat));
+    }
+  } catch {
+    return sampleChats.map((chat) => normalizeChat(chat));
+  }
+
+  return sampleChats.map((chat) => normalizeChat(chat));
+}
+
+async function saveChats(env, chats) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(CHAT_STORE_KEY, JSON.stringify(chats.map(normalizeChat)));
+  return true;
+}
+
 async function readBody(request) {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -390,11 +506,11 @@ function stripRuntimeOnlyFields(execution) {
   return safeExecution;
 }
 
-function renderDashboard({ executions, env, url }) {
+function renderDashboard({ executions, chats, env, url }) {
   const cards = executions.map(renderExecutionCard).join("");
   const decisions = buildDecisionItems(executions).length;
   const notifications = buildNotifications(executions).length;
-  const repositorySummaries = buildRepositorySummaries(executions);
+  const repositorySummaries = buildRepositorySummaries(executions, chats);
   return page({
     title: "VTDD v3 オーケストレーター",
     body: `
@@ -405,6 +521,7 @@ function renderDashboard({ executions, env, url }) {
         <div class="meta">
           <span>モード: ${escapeHtml(env?.VTDD_V3_MODE || "unknown")}</span>
           <span>${executions.length} 件の実行</span>
+          <span>${chats.length} 件のチャット</span>
           <span>${decisions} 件の判断待ち</span>
           <span>${notifications} 件の通知</span>
         </div>
@@ -463,6 +580,88 @@ function renderProgress({ execution }) {
         </div>
       </section>
       ${renderExecutionCard(execution, { expanded: true })}
+    `
+  });
+}
+
+function renderRepositoryChats({ repository, chats, executions }) {
+  const repoChats = chats
+    .filter((chat) => chat.repository === repository)
+    .sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+  const repoExecutions = executions.filter((execution) => execution.repository === repository);
+  return page({
+    title: `${repository} - 開発チャット`,
+    body: `
+      <section class="hero">
+        <p class="eyebrow">Repository chats</p>
+        <h1>${escapeHtml(repository)} の開発チャット</h1>
+        <p>Issue / PR / execution に紐づいた会話を、ChatGPT thread 一覧ではなく VTDD dashboard 側で探せるようにします。</p>
+        <div class="meta">
+          <span>${repoChats.length} 件のチャット</span>
+          <span>${repoExecutions.length} 件の execution</span>
+        </div>
+        <div class="actions hero-actions">
+          <a class="button" href="/orchestrator">Dashboard</a>
+          <a class="button" href="${escapeAttribute(repositoryUrl(repository))}">Repository</a>
+          <a class="button" href="/api/chats?repository=${encodeURIComponent(repository)}">JSON</a>
+        </div>
+      </section>
+      <section>
+        <div class="section-title">
+          <h2>Active / pinned</h2>
+          <span>今見るべきチャット</span>
+        </div>
+        <div class="grid">${repoChats.filter((chat) => ["active", "pinned"].includes(chat.status)).map(renderChatCard).join("") || `<p class="muted">active chat はありません。</p>`}</div>
+      </section>
+      <section>
+        <div class="section-title">
+          <h2>Archived</h2>
+          <span>summary-first で残す履歴</span>
+        </div>
+        <div class="grid">${repoChats.filter((chat) => ["archived", "cold"].includes(chat.status)).map(renderChatCard).join("") || `<p class="muted">archived chat はありません。</p>`}</div>
+      </section>
+    `
+  });
+}
+
+function renderChatDetail({ chat, executions }) {
+  const execution = executions.find((item) => item.executionId === chat.executionId);
+  return page({
+    title: `${chat.chatId} - VTDD chat`,
+    body: `
+      <section class="hero">
+        <p class="eyebrow">${escapeHtml(chat.repository)} / ${escapeHtml(displayChatStatus(chat.status))}</p>
+        <h1>${escapeHtml(chat.title)}</h1>
+        <p>${escapeHtml(chat.summary)}</p>
+        <div class="actions hero-actions">
+          <a class="button" href="/repositories/${encodeURIComponent(chat.repository.split("/")[0])}/${encodeURIComponent(chat.repository.split("/")[1])}/chats">Repo chats</a>
+          <a class="button" href="${escapeAttribute(repositoryUrl(chat.repository))}">Repository</a>
+          ${chat.issueNumber ? `<a class="button" href="${escapeAttribute(repositoryUrl(chat.repository))}/issues/${escapeAttribute(chat.issueNumber)}">Issue</a>` : ""}
+          ${chat.prNumber ? `<a class="button" href="${escapeAttribute(repositoryUrl(chat.repository))}/pull/${escapeAttribute(chat.prNumber)}">PR</a>` : ""}
+          ${execution ? `<a class="button" href="/progress/${encodeURIComponent(execution.executionId)}">進捗</a>` : ""}
+          <a class="button" href="/api/chats/${encodeURIComponent(chat.chatId)}">JSON</a>
+        </div>
+      </section>
+      <section class="card wide">
+        <h2>Summary first</h2>
+        <p>${escapeHtml(chat.summary)}</p>
+        <dl>
+          <div><dt>chatId</dt><dd>${escapeHtml(chat.chatId)}</dd></div>
+          <div><dt>status</dt><dd>${escapeHtml(displayChatStatus(chat.status))}</dd></div>
+          <div><dt>Issue</dt><dd>${escapeHtml(chat.issueNumber || "なし")}</dd></div>
+          <div><dt>PR</dt><dd>${escapeHtml(chat.prNumber || "なし")}</dd></div>
+          <div><dt>executionId</dt><dd>${escapeHtml(chat.executionId || "なし")}</dd></div>
+          <div><dt>更新</dt><dd>${escapeHtml(formatDate(chat.updatedAt))}</dd></div>
+        </dl>
+        <div class="meta compact">${chat.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>
+      </section>
+      <section>
+        <div class="section-title">
+          <h2>必要時だけ開く transcript</h2>
+          <span>raw log / CoT / secret は保存しない</span>
+        </div>
+        <div class="stack">${chat.messages.map(renderChatMessage).join("")}</div>
+      </section>
     `
   });
 }
@@ -606,11 +805,38 @@ function renderRepositorySummary(summary) {
       <p>${escapeHtml(latest.currentStep || "進捗なし")}</p>
       <div class="actions">
         <a class="button" href="${escapeAttribute(summary.repositoryUrl)}">Repository</a>
+        <a class="button" href="${escapeAttribute(summary.chatUrl)}">チャット</a>
         ${latest ? `<a class="button" href="/progress/${encodeURIComponent(latest.executionId)}">最新の進捗</a>` : ""}
         ${summary.openPrUrl ? `<a class="button" href="${escapeAttribute(summary.openPrUrl)}">PR</a>` : ""}
       </div>
     </article>
   `;
+}
+
+function renderChatCard(chat) {
+  return `
+    <article class="card chat-card">
+      <div class="card-head">
+        <div>
+          <h3>${escapeHtml(chat.title)}</h3>
+          <p>${escapeHtml(chat.repository)}${chat.issueNumber ? ` #${escapeHtml(chat.issueNumber)}` : ""}</p>
+        </div>
+        <span class="pill ${escapeAttribute(chat.status)}">${escapeHtml(displayChatStatus(chat.status))}</span>
+      </div>
+      <p>${escapeHtml(chat.summary)}</p>
+      <p class="muted">${escapeHtml(chat.lastMessage)}</p>
+      <div class="meta compact">${chat.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>
+      <div class="actions">
+        <a class="button" href="/chats/${encodeURIComponent(chat.chatId)}">チャットを開く</a>
+        ${chat.issueNumber ? `<a class="button" href="${escapeAttribute(repositoryUrl(chat.repository))}/issues/${escapeAttribute(chat.issueNumber)}">Issue</a>` : ""}
+        ${chat.prNumber ? `<a class="button" href="${escapeAttribute(repositoryUrl(chat.repository))}/pull/${escapeAttribute(chat.prNumber)}">PR</a>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderChatMessage(message) {
+  return `<article class="card wide"><p class="eyebrow">${escapeHtml(displayMessageRole(message.role))} / ${escapeHtml(formatDate(message.createdAt))}</p><p>${escapeHtml(message.text)}</p></article>`;
 }
 
 function renderDecisionItem(item) {
@@ -646,7 +872,7 @@ function buildNotifications(executions) {
   );
 }
 
-function buildRepositorySummaries(executions) {
+function buildRepositorySummaries(executions, chats = []) {
   const grouped = new Map();
   for (const execution of executions) {
     const repository = normalizeText(execution.repository) || "unknown";
@@ -663,6 +889,8 @@ function buildRepositorySummaries(executions) {
       return {
         repository,
         repositoryUrl: repositoryUrl(repository),
+        chatUrl: repositoryChatsUrl(repository),
+        chatCount: chats.filter((chat) => chat.repository === repository).length,
         executions: repoExecutions,
         latestExecution: sorted[0],
         averageProgress,
@@ -674,6 +902,87 @@ function buildRepositorySummaries(executions) {
       };
     })
     .sort((a, b) => Date.parse(b.latestExecution?.lastUpdatedAt || 0) - Date.parse(a.latestExecution?.lastUpdatedAt || 0));
+}
+
+function validateChatInput(body) {
+  const forbiddenField = forbiddenChatFields.find((field) => Object.prototype.hasOwnProperty.call(body, field));
+  if (forbiddenField) {
+    return { ok: false, error: "forbidden_chat_field", field: forbiddenField };
+  }
+
+  if (!/^[\w.-]+\/[\w.-]+$/.test(normalizeText(body.repository))) {
+    return { ok: false, error: "repository_required" };
+  }
+
+  if (!normalizeText(body.title)) {
+    return { ok: false, error: "title_required" };
+  }
+
+  const status = normalizeText(body.status) || "active";
+  if (!allowedChatStatuses.includes(status)) {
+    return { ok: false, error: "unsupported_chat_status", allowedChatStatuses };
+  }
+
+  return { ok: true };
+}
+
+function buildChatRecord(body) {
+  const now = new Date().toISOString();
+  const repository = normalizeText(body.repository);
+  const issueNumber = normalizeIssueNumber(body.issueNumber);
+  const title = normalizeText(body.title).slice(0, 140);
+  const chatId = normalizeText(body.chatId) || buildChatId({ repository, issueNumber, title, now });
+  const summary = normalizeText(body.summary).slice(0, 800) || "summary はまだありません。";
+  const firstMessage = normalizeText(body.message || body.lastMessage).slice(0, 1000);
+  return normalizeChat({
+    chatId,
+    repository,
+    issueNumber,
+    prNumber: normalizeIssueNumber(body.prNumber),
+    executionId: normalizeText(body.executionId).slice(0, 120) || null,
+    title,
+    status: normalizeText(body.status) || "active",
+    summary,
+    lastMessage: firstMessage || summary,
+    tags: normalizeStringList(body.tags),
+    createdAt: normalizeTimestamp(body.createdAt || now),
+    updatedAt: normalizeTimestamp(body.updatedAt || now),
+    messages: firstMessage ? [{ role: "owner", text: firstMessage, createdAt: now }] : []
+  });
+}
+
+function normalizeChat(chat) {
+  const messages = Array.isArray(chat.messages) ? chat.messages : [];
+  return {
+    chatId: normalizeText(chat.chatId).slice(0, 180),
+    repository: normalizeText(chat.repository),
+    issueNumber: normalizeIssueNumber(chat.issueNumber),
+    prNumber: normalizeIssueNumber(chat.prNumber),
+    executionId: normalizeText(chat.executionId).slice(0, 140) || null,
+    title: normalizeText(chat.title).slice(0, 180) || "Untitled chat",
+    status: allowedChatStatuses.includes(chat.status) ? chat.status : "active",
+    summary: normalizeText(chat.summary).slice(0, 1200) || "summary はまだありません。",
+    lastMessage: normalizeText(chat.lastMessage).slice(0, 1000),
+    tags: normalizeStringList(chat.tags),
+    createdAt: normalizeTimestamp(chat.createdAt),
+    updatedAt: normalizeTimestamp(chat.updatedAt),
+    messages: messages.slice(-30).map(normalizeChatMessage).filter((message) => message.text)
+  };
+}
+
+function normalizeChatMessage(message) {
+  return {
+    role: ["owner", "butler", "runner", "system"].includes(message?.role) ? message.role : "system",
+    text: normalizeText(message?.text).slice(0, 1200),
+    createdAt: normalizeTimestamp(message?.createdAt)
+  };
+}
+
+function buildChatId({ repository, issueNumber, title, now }) {
+  const repoSlug = repository.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const titleSlug = title.replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-|-$/g, "").slice(0, 32) || "chat";
+  const date = new Date(now).toISOString().slice(0, 10).replace(/-/g, "");
+  return `chat-${repoSlug}-${issueNumber ? `issue${issueNumber}-` : ""}${titleSlug}-${date}-${Date.now().toString(36)}`;
 }
 
 function buildDispatchPreview({ body, origin }) {
@@ -892,6 +1201,12 @@ function repositoryUrl(repository) {
   return `https://github.com/${text}`;
 }
 
+function repositoryChatsUrl(repository) {
+  const [owner, repo] = normalizeText(repository).split("/");
+  if (!owner || !repo) return "/orchestrator";
+  return `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/chats`;
+}
+
 function issueUrlFor(execution) {
   if (!execution.issueNumber) return null;
   return `${repositoryUrl(execution.repository)}/issues/${encodeURIComponent(execution.issueNumber)}`;
@@ -953,6 +1268,24 @@ function displayNextAction(action) {
   }[action] || action;
 }
 
+function displayChatStatus(status) {
+  return {
+    active: "進行中",
+    pinned: "固定",
+    archived: "アーカイブ",
+    cold: "保管"
+  }[status] || status;
+}
+
+function displayMessageRole(role) {
+  return {
+    owner: "オーナー",
+    butler: "Butler",
+    runner: "Runner",
+    system: "System"
+  }[role] || role;
+}
+
 function page({ title, body }) {
   return `<!doctype html>
 <html lang="ja">
@@ -981,6 +1314,7 @@ function page({ title, body }) {
     .card, .notice { background:#fff; border:1px solid #dce3dc; border-radius:8px; padding:16px; box-shadow:0 8px 22px rgba(30, 44, 36, .06); }
     .wide { max-width:780px; }
     .repo-card { border-left:4px solid #2e7359; }
+    .chat-card { border-left:4px solid #746c2d; }
     .card-head { justify-content:space-between; align-items:flex-start; }
     .card h3 { margin:0 0 4px; font-size:17px; }
     .card p { color:#4d5b56; line-height:1.5; }

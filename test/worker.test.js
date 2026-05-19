@@ -37,6 +37,8 @@ test("orchestrator dashboard renders execution cards", async () => {
   assert.equal(html.includes("PR を開く"), true);
   assert.equal(html.includes("進行中の開発"), true);
   assert.equal(html.includes("リポジトリ別の進捗"), true);
+  assert.equal(html.includes("チャット"), true);
+  assert.equal(html.includes("/repositories/marushu/vtdd-v3/chats"), true);
   assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p"), true);
   assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p/issues/426"), true);
   assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p/pull/425"), true);
@@ -135,6 +137,83 @@ test("issues API exposes v3 planning catalog", async () => {
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.equal(body.issues.some((issue) => issue.number === 1), true);
+  assert.equal(body.issues.some((issue) => issue.number === 8), true);
+});
+
+test("repository chat pages list active and archived chats", async () => {
+  const response = await worker.fetch(new Request("https://example.com/repositories/marushu/vtdd-v3/chats"), {
+    VTDD_V3_MODE: "test"
+  });
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.equal(html.includes("marushu/vtdd-v3 の開発チャット"), true);
+  assert.equal(html.includes("VPS runner pickup adapter"), true);
+  assert.equal(html.includes("chat-vtdd-v3-issue5-runner-pickup-20260519-001"), true);
+  assert.equal(html.includes("Summary first"), false);
+});
+
+test("chat detail is summary-first and links to GitHub truth", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/chats/chat-vtdd-v3-issue5-runner-pickup-20260519-001"),
+    { VTDD_V3_MODE: "test" }
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.equal(html.includes("Summary first"), true);
+  assert.equal(html.includes("VPS runner pickup adapter"), true);
+  assert.equal(html.includes("https://github.com/marushu/vtdd-v3/issues/5"), true);
+  assert.equal(html.includes("必要時だけ開く transcript"), true);
+});
+
+test("chat API creates safe repository-scoped chat records", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const response = await worker.fetch(
+    new Request("https://example.com/api/chats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 8,
+        executionId: "remote-codex-chat-8",
+        title: "リポジトリ別チャットを作る",
+        status: "active",
+        summary: "repo / Issue / execution に紐づく chat record を作る。",
+        message: "このチャットは dashboard から戻れるようにする。",
+        tags: ["chat", "dashboard"]
+      })
+    }),
+    env
+  );
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.chat.repository, "marushu/vtdd-v3");
+  assert.equal(body.chat.issueNumber, 8);
+  assert.equal(body.chat.messages.length, 1);
+  assert.equal(body.chatUrl.startsWith("/chats/chat-marushu-vtdd-v3-issue8-"), true);
+
+  const list = await worker.fetch(new Request("https://example.com/api/chats?repository=marushu%2Fvtdd-v3"), env);
+  assert.equal(list.status, 200);
+  const listBody = await list.json();
+  assert.equal(listBody.chats.some((chat) => chat.chatId === body.chat.chatId), true);
+});
+
+test("chat API rejects unsafe transcript fields", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/api/chats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        title: "危険な chat",
+        rawTranscript: "do not store"
+      })
+    }),
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
+  );
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "forbidden_chat_field");
 });
 
 test("event contract API exposes allowed phases and safety boundary", async () => {
