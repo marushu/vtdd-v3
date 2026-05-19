@@ -64,6 +64,7 @@ const notificationEventTypes = [
   { key: "human_decision_ready", label: "Human decision ready" },
   { key: "deploy_required", label: "Deploy required" },
   { key: "deploy_completed", label: "Deploy completed" },
+  { key: "deploy_failed", label: "Deploy failed" },
   { key: "execution_stale", label: "Execution stale / hung" },
   { key: "execution_completed", label: "Execution completed" },
   { key: "execution_failed", label: "Execution failed" }
@@ -224,6 +225,10 @@ export default {
       return html(renderNotificationSettings({ settings: notificationSettings }));
     }
 
+    if (url.pathname === "/deploys") {
+      return html(renderDeployMonitor({ url }));
+    }
+
     if (url.pathname === "/butler") {
       return html(renderButler({ url }));
     }
@@ -271,6 +276,21 @@ export default {
       const settings = buildNotificationSettings(body);
       await saveNotificationSettings(env, settings);
       return json({ ok: true, settings }, 200);
+    }
+
+    if (url.pathname === "/api/github/deploy-runs" && request.method === "GET") {
+      const result = await fetchGithubDeployRuns({ env, url });
+      return json(result, result.ok ? 200 : result.statusCode || 400);
+    }
+
+    if (url.pathname === "/api/github/deploy-run-sync" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = await syncGithubDeployRun({ env, body, url, executions });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveExecutions(env, executions);
+      return json(result, result.execution.createdFromEvent ? 201 : 200);
     }
 
     if (url.pathname === "/api/chats" && request.method === "GET") {
@@ -513,6 +533,205 @@ async function saveNotificationSettings(env, settings) {
   return true;
 }
 
+async function fetchGithubDeployRuns({ env, url }) {
+  const targetRepository = normalizeRepositoryInput(url.searchParams.get("targetRepository") || url.searchParams.get("repository") || "marushu/vtdd-v3");
+  const workflowRepository = normalizeRepositoryInput(url.searchParams.get("workflowRepository") || targetRepository);
+  const workflow = normalizeWorkflowFile(url.searchParams.get("workflow") || "deploy-production.yml");
+  const runId = normalizeText(url.searchParams.get("runId"));
+  const limit = Math.max(1, Math.min(10, Number(url.searchParams.get("limit") || 5)));
+  const validation = validateGithubDeployLookup({ targetRepository, workflowRepository, workflow });
+  if (!validation.ok) return validation;
+
+  const runsResult = await loadGithubWorkflowRuns({ env, workflowRepository, workflow, runId, limit });
+  if (!runsResult.ok) return runsResult;
+
+  const runs = runsResult.runs.map((run) => buildDeployRunSummary({ run, targetRepository, workflowRepository, workflow }));
+  return {
+    ok: true,
+    targetRepository,
+    workflowRepository,
+    workflow,
+    runs
+  };
+}
+
+async function syncGithubDeployRun({ env, body, url, executions }) {
+  const targetRepository = normalizeRepositoryInput(body.targetRepository || body.repository || "marushu/vtdd-v3");
+  const workflowRepository = normalizeRepositoryInput(body.workflowRepository || targetRepository);
+  const workflow = normalizeWorkflowFile(body.workflow || "deploy-production.yml");
+  const runId = normalizeText(body.runId);
+  const validation = validateGithubDeployLookup({ targetRepository, workflowRepository, workflow });
+  if (!validation.ok) return validation;
+
+  const runsResult = await loadGithubWorkflowRuns({ env, workflowRepository, workflow, runId, limit: 1 });
+  if (!runsResult.ok) return runsResult;
+  const run = runsResult.runs[0];
+  if (!run) {
+    return { ok: false, error: "deploy_run_not_found", statusCode: 404 };
+  }
+
+  const event = buildExecutionEventFromDeployRun({ run, targetRepository, workflowRepository, workflow });
+  const execution = applyExecutionEvent(executions, event, url.origin);
+  execution.runUrl = event.runUrl;
+  execution.workflowRepository = workflowRepository;
+  execution.workflowRunId = String(event.workflowRunId);
+  return {
+    ok: true,
+    targetRepository,
+    workflowRepository,
+    workflow,
+    run: buildDeployRunSummary({ run, targetRepository, workflowRepository, workflow }),
+    execution,
+    progressUrl: `${url.origin}/progress/${encodeURIComponent(execution.executionId)}`,
+    runUrl: event.runUrl
+  };
+}
+
+async function loadGithubWorkflowRuns({ env, workflowRepository, workflow, runId, limit }) {
+  const fixture = normalizeText(env?.GITHUB_DEPLOY_RUNS_FIXTURE);
+  if (fixture) {
+    try {
+      const parsed = JSON.parse(fixture);
+      const runs = Array.isArray(parsed) ? parsed : Array.isArray(parsed.workflow_runs) ? parsed.workflow_runs : [parsed];
+      return {
+        ok: true,
+        runs: runId ? runs.filter((run) => String(run.id) === runId || String(run.databaseId) === runId) : runs.slice(0, limit)
+      };
+    } catch {
+      return { ok: false, error: "invalid_github_deploy_runs_fixture", statusCode: 500 };
+    }
+  }
+
+  const [owner, repo] = workflowRepository.split("/");
+  const apiPath = runId
+    ? `https://api.github.com/repos/${owner}/${repo}/actions/runs/${encodeURIComponent(runId)}`
+    : `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=${limit}`;
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "vtdd-v3-orchestrator"
+  };
+  const token = normalizeText(env?.GITHUB_TOKEN);
+  if (token) headers.authorization = `Bearer ${token}`;
+  const response = await fetch(apiPath, { headers });
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: "github_actions_fetch_failed",
+      statusCode: response.status,
+      reason: `GitHub Actions API returned ${response.status}`
+    };
+  }
+  const body = await response.json();
+  return {
+    ok: true,
+    runs: runId ? [body] : Array.isArray(body.workflow_runs) ? body.workflow_runs : []
+  };
+}
+
+function validateGithubDeployLookup({ targetRepository, workflowRepository, workflow }) {
+  if (!targetRepository || !workflowRepository) {
+    return { ok: false, error: "repository_required", statusCode: 400 };
+  }
+  if (!workflow) {
+    return { ok: false, error: "workflow_required", statusCode: 400 };
+  }
+  return { ok: true };
+}
+
+function buildDeployRunSummary({ run, targetRepository, workflowRepository, workflow }) {
+  return {
+    id: String(run.id ?? run.databaseId ?? ""),
+    targetRepository,
+    workflowRepository,
+    workflow,
+    status: normalizeText(run.status) || "unknown",
+    conclusion: normalizeText(run.conclusion) || null,
+    branch: normalizeText(run.head_branch || run.headBranch) || "unknown",
+    title: normalizeText(run.display_title || run.displayTitle || run.name) || "deploy-production",
+    runUrl: normalizeText(run.html_url || run.url),
+    createdAt: normalizeTimestamp(run.created_at || run.createdAt),
+    updatedAt: normalizeTimestamp(run.updated_at || run.updatedAt)
+  };
+}
+
+function buildExecutionEventFromDeployRun({ run, targetRepository, workflowRepository, workflow }) {
+  const summary = buildDeployRunSummary({ run, targetRepository, workflowRepository, workflow });
+  const state = deployExecutionStateForRun(summary);
+  return {
+    executionId: `github-deploy-${workflowRepository.replace("/", "-")}-${summary.id}`,
+    repository: targetRepository,
+    issueNumber: 4,
+    title: `GitHub deploy: ${workflowRepository} ${workflow}`,
+    branch: summary.branch,
+    status: state.status,
+    phase: state.phase,
+    progress: state.progress,
+    currentStep: state.currentStep,
+    blocker: state.blocker,
+    nextHumanAction: state.nextHumanAction,
+    timestamp: summary.updatedAt,
+    notifications: state.notifications,
+    runUrl: summary.runUrl,
+    workflowRepository,
+    workflowRunId: summary.id
+  };
+}
+
+function deployExecutionStateForRun(run) {
+  if (run.status === "completed" && run.conclusion === "success") {
+    return {
+      status: "completed",
+      phase: "completed",
+      progress: 100,
+      currentStep: "GitHub deploy run completed successfully.",
+      blocker: null,
+      nextHumanAction: "review_dashboard",
+      notifications: ["deploy completed: GitHub Actions reported success."]
+    };
+  }
+  if (run.status === "completed") {
+    return {
+      status: run.conclusion === "cancelled" ? "canceled" : "failed",
+      phase: run.conclusion === "cancelled" ? "canceled" : "failed",
+      progress: 100,
+      currentStep: `GitHub deploy run failed: conclusion=${run.conclusion || "unknown"}.`,
+      blocker: `GitHub deploy run failed: ${run.conclusion || "unknown"}.`,
+      nextHumanAction: "investigate",
+      notifications: [`deploy failed: GitHub Actions conclusion=${run.conclusion || "unknown"}.`]
+    };
+  }
+  if (run.status === "queued") {
+    return {
+      status: "queued",
+      phase: "queued",
+      progress: 5,
+      currentStep: "GitHub deploy run is queued.",
+      blocker: null,
+      nextHumanAction: "wait",
+      notifications: ["deploy required: GitHub Actions run is queued."]
+    };
+  }
+  return {
+    status: "running",
+    phase: "running_tests",
+    progress: 72,
+    currentStep: `GitHub deploy run is ${run.status || "in progress"}.`,
+    blocker: null,
+    nextHumanAction: "wait",
+    notifications: ["deploy required: GitHub Actions run is in progress."]
+  };
+}
+
+function normalizeRepositoryInput(value) {
+  const text = normalizeText(value);
+  return /^[\w.-]+\/[\w.-]+$/.test(text) ? text : "";
+}
+
+function normalizeWorkflowFile(value) {
+  const text = normalizeText(value);
+  return /^[\w.-]+\.ya?ml$/.test(text) ? text : "";
+}
+
 async function readBody(request) {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -598,6 +817,9 @@ function normalizeStoredExecution(execution) {
     currentStep: normalizeText(execution.currentStep),
     touchedFiles: normalizeStringList(execution.touchedFiles),
     prUrl: normalizeText(execution.prUrl) || null,
+    runUrl: normalizeText(execution.runUrl) || null,
+    workflowRepository: normalizeText(execution.workflowRepository) || null,
+    workflowRunId: normalizeText(execution.workflowRunId) || null,
     blocker: normalizeText(execution.blocker) || null,
     lastUpdatedAt: normalizeTimestamp(execution.lastUpdatedAt),
     nextHumanAction: normalizeText(execution.nextHumanAction) || "wait",
@@ -633,6 +855,7 @@ function renderDashboard({ executions, chats, env, url }) {
         <div class="actions hero-actions">
           <a class="button primary" href="/dispatch">開発を投げる</a>
           <a class="button primary" href="/butler">Butler に指示</a>
+          <a class="button" href="/deploys">Deploy run を拾う</a>
           <a class="button" href="/decisions">判断待ち</a>
           <a class="button" href="/notifications">通知</a>
           <a class="button" href="/api/executions">JSON</a>
@@ -684,6 +907,7 @@ function renderProgress({ execution }) {
           <a class="button" href="${escapeAttribute(repoUrl)}">Repository</a>
           ${issueUrl ? `<a class="button" href="${escapeAttribute(issueUrl)}">Issue</a>` : ""}
           ${execution.prUrl ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">${escapeHtml(linkLabelForPrUrl(execution.prUrl))}</a>` : ""}
+          ${execution.runUrl ? `<a class="button" href="${escapeAttribute(execution.runUrl)}">GitHub run</a>` : ""}
         </div>
       </section>
       ${renderExecutionCard(execution, { expanded: true })}
@@ -1255,6 +1479,58 @@ function renderNotificationSettings({ settings }) {
   });
 }
 
+function renderDeployMonitor({ url }) {
+  return page({
+    title: "VTDD deploy run monitor",
+    refreshSeconds: 20,
+    body: `
+      <section class="hero">
+        <p class="eyebrow">GitHub Actions pickup</p>
+        <h1>Deploy run を拾う</h1>
+        <p>Custom GPT を待たず、GitHub Actions の deploy run を v3 dashboard の execution / 通知へ同期します。deploy 実行や approval grant 保存はしません。</p>
+        <div class="actions hero-actions">
+          <a class="button" href="/orchestrator">Dashboard</a>
+          <a class="button" href="/notifications">通知</a>
+          <a class="button" href="/api/github/deploy-runs?targetRepository=marushu%2Fvtdd-v3&workflowRepository=marushu%2Fvtdd-v2-p&workflow=deploy-production.yml&limit=5">最新 run JSON</a>
+        </div>
+      </section>
+      <section class="card wide">
+        <h2>GitHub deploy run sync</h2>
+        <form id="deploy-run-sync-form" class="form-grid">
+          <label>Target repository <input name="targetRepository" value="marushu/vtdd-v3"></label>
+          <label>Workflow repository <input name="workflowRepository" value="marushu/vtdd-v2-p"></label>
+          <label>Workflow file <input name="workflow" value="deploy-production.yml"></label>
+          <label>Run ID <input name="runId" placeholder="空なら最新 run"></label>
+          <button class="button primary" type="submit">deploy run を dashboard に同期</button>
+        </form>
+        <div id="deploy-run-sync-result" class="notice" hidden></div>
+        <p class="muted">Worker origin: ${escapeHtml(url.origin)}</p>
+      </section>
+      <script>
+        (() => {
+          const form = document.getElementById("deploy-run-sync-form");
+          const result = document.getElementById("deploy-run-sync-result");
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            result.hidden = false;
+            result.textContent = "GitHub Actions run を確認しています。";
+            const response = await fetch("/api/github/deploy-run-sync", {
+              method: "POST",
+              body: new FormData(form)
+            });
+            const body = await response.json();
+            if (!response.ok) {
+              result.textContent = body.reason || body.error || "deploy run sync に失敗しました。";
+              return;
+            }
+            result.innerHTML = '<h3>' + body.execution.status + '</h3><p>' + body.execution.currentStep + '</p><div class="actions"><a class="button" href="' + body.progressUrl + '">進捗</a><a class="button" href="' + body.runUrl + '">GitHub run</a><a class="button" href="/notifications">通知</a></div>';
+          });
+        })();
+      </script>
+    `
+  });
+}
+
 function renderDispatch({ url }) {
   return page({
     title: "VTDD 開発 dispatch",
@@ -1304,6 +1580,9 @@ function renderExecutionCard(execution, options = {}) {
   const pr = execution.prUrl
     ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">${escapeHtml(linkLabelForPrUrl(execution.prUrl))}</a>`
     : `<span class="muted">PR はまだありません</span>`;
+  const run = execution.runUrl
+    ? `<a class="button" href="${escapeAttribute(execution.runUrl)}">GitHub run</a>`
+    : "";
   const blocker = execution.blocker
     ? `<p class="blocker">Blocker: ${escapeHtml(execution.blocker)}</p>`
     : "";
@@ -1332,6 +1611,7 @@ function renderExecutionCard(execution, options = {}) {
         <a class="button" href="${escapeAttribute(repoUrl)}">Repository</a>
         ${issueUrl ? `<a class="button" href="${escapeAttribute(issueUrl)}">Issue</a>` : ""}
         ${pr}
+        ${run}
       </div>
       ${options.expanded ? `<pre>${escapeHtml(JSON.stringify(execution, null, 2))}</pre>` : ""}
     </article>
@@ -1483,6 +1763,7 @@ function inferNotificationEventType(execution, message) {
   if (/test.*pass|passed test|テスト.*成功/.test(text)) return "test_passed";
   if (/reviewer.*object|objected|review.*fail|指摘/.test(text)) return "reviewer_objected";
   if (/deploy.*required|deploy required|デプロイ.*必要/.test(text)) return "deploy_required";
+  if (/deploy.*fail|deploy failure|デプロイ.*失敗/.test(text)) return "deploy_failed";
   if (/deploy.*completed|deploy success|デプロイ.*完了|cloudflare deploy 成功/.test(text)) return "deploy_completed";
   if (/stale|hung|停滞/.test(text)) return "execution_stale";
   if (execution.nextHumanAction && execution.nextHumanAction !== "wait") return "human_decision_ready";

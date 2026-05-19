@@ -108,6 +108,65 @@ test("notifications page and API expose owner signals", async () => {
   assert.equal(body.notifications.some((item) => item.eventType === "human_decision_ready"), true);
 });
 
+test("deploy monitor syncs GitHub Actions run into dashboard execution", async () => {
+  const fixture = JSON.stringify({
+    id: 26085856370,
+    status: "completed",
+    conclusion: "failure",
+    head_branch: "main",
+    display_title: "deploy-production",
+    html_url: "https://github.com/marushu/vtdd-v2-p/actions/runs/26085856370",
+    created_at: "2026-05-19T08:33:39Z",
+    updated_at: "2026-05-19T08:33:56Z"
+  });
+  const env = {
+    VTDD_V3_MODE: "test",
+    EXECUTION_STORE: createMemoryStore(),
+    GITHUB_DEPLOY_RUNS_FIXTURE: fixture
+  };
+
+  const page = await worker.fetch(new Request("https://example.com/deploys"), env);
+  assert.equal(page.status, 200);
+  const pageHtml = await page.text();
+  assert.equal(pageHtml.includes("Deploy run を拾う"), true);
+  assert.equal(pageHtml.includes("workflowRepository"), true);
+  assert.equal(pageHtml.includes("/api/github/deploy-run-sync"), true);
+
+  const list = await worker.fetch(
+    new Request("https://example.com/api/github/deploy-runs?targetRepository=marushu%2Fvtdd-v3&workflowRepository=marushu%2Fvtdd-v2-p"),
+    env
+  );
+  assert.equal(list.status, 200);
+  const listBody = await list.json();
+  assert.equal(listBody.runs[0].targetRepository, "marushu/vtdd-v3");
+  assert.equal(listBody.runs[0].workflowRepository, "marushu/vtdd-v2-p");
+
+  const synced = await worker.fetch(
+    new Request("https://example.com/api/github/deploy-run-sync", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        targetRepository: "marushu/vtdd-v3",
+        workflowRepository: "marushu/vtdd-v2-p",
+        workflow: "deploy-production.yml",
+        runId: "26085856370"
+      })
+    }),
+    env
+  );
+  assert.equal(synced.status, 201);
+  const body = await synced.json();
+  assert.equal(body.execution.repository, "marushu/vtdd-v3");
+  assert.equal(body.execution.workflowRepository, "marushu/vtdd-v2-p");
+  assert.equal(body.execution.status, "failed");
+  assert.equal(body.execution.nextHumanAction, "investigate");
+  assert.equal(body.runUrl, "https://github.com/marushu/vtdd-v2-p/actions/runs/26085856370");
+
+  const notifications = await worker.fetch(new Request("https://example.com/api/notifications"), env);
+  const notificationBody = await notifications.json();
+  assert.equal(notificationBody.notifications.some((item) => item.eventType === "deploy_failed"), true);
+});
+
 test("notification settings default to all events and can filter known event types", async () => {
   const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
   const settingsPage = await worker.fetch(new Request("https://example.com/notifications/settings"), env);

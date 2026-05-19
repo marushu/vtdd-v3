@@ -13,6 +13,7 @@ ChatGPT thread を polling しなくても、work の状態変化をオーナー
 - human decision ready。
 - deploy required。
 - deploy completed。
+- deploy failed。
 - execution stale / hung。
 
 ## 成功条件
@@ -23,6 +24,7 @@ ChatGPT thread を polling しなくても、work の状態変化をオーナー
 - event type を checkbox で ON/OFF できる。
 - 新しい event type が途中追加された場合、設定に存在しない未知 event は default ON として扱う。
 - 通知が progress page と PR にリンクする。
+- GitHub Actions deploy run を dashboard execution に同期し、run URL と progress page にリンクする。
 - 外部 push channel を差し替え可能にする。
 - secret や approval grant value を含めない。
 
