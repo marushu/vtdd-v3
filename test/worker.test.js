@@ -216,6 +216,68 @@ test("chat API rejects unsafe transcript fields", async () => {
   assert.equal(body.error, "forbidden_chat_field");
 });
 
+test("chat message API appends messages and updates sort order", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const created = await worker.fetch(
+    new Request("https://example.com/api/chats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 9,
+        executionId: "remote-codex-chat-reply",
+        title: "VPS Codex CLI の返事",
+        summary: "runner が該当チャットに返事する。",
+        message: "まず runner に指示する。",
+        tags: ["runner", "reply"]
+      })
+    }),
+    env
+  );
+  const createdBody = await created.json();
+  const response = await worker.fetch(
+    new Request(`https://example.com/api/chats/${createdBody.chat.chatId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        role: "runner",
+        text: "VPS runner が返事しました。"
+      })
+    }),
+    env
+  );
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.equal(body.chat.messages.at(-1).role, "runner");
+  assert.equal(body.chat.lastMessage, "VPS runner が返事しました。");
+
+  const filtered = await worker.fetch(new Request("https://example.com/api/chats?executionId=remote-codex-chat-reply"), env);
+  const filteredBody = await filtered.json();
+  assert.equal(filteredBody.chats[0].chatId, createdBody.chat.chatId);
+
+  const search = await worker.fetch(new Request("https://example.com/api/chats/search?q=返事"), env);
+  const searchBody = await search.json();
+  assert.equal(searchBody.results[0].chatId, createdBody.chat.chatId);
+});
+
+test("chat message API rejects unsafe runner fields", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/api/chats/chat-vtdd-v3-issue5-runner-pickup-20260519-001/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        role: "runner",
+        text: "unsafe",
+        rawLog: "secret terminal dump"
+      })
+    }),
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
+  );
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "forbidden_chat_field");
+});
+
 test("event contract API exposes allowed phases and safety boundary", async () => {
   const response = await worker.fetch(new Request("https://example.com/api/event-contract"), {
     VTDD_V3_MODE: "test"

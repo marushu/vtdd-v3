@@ -32,6 +32,7 @@ export async function runOnce(config = {}) {
   const target = queued[0];
   const claimed = await claimExecution(options, target.executionId);
   const execution = claimed.execution;
+  const chat = await findExecutionChat(options, execution);
 
   await postEvent(options, {
     ...baseEvent(execution),
@@ -39,6 +40,7 @@ export async function runOnce(config = {}) {
     currentStep: options.execute ? "Starting Codex CLI." : "Dry-run runner verified queue claim.",
     progress: 14
   });
+  await postRunnerMessage(options, chat, `Runner ${options.runnerId} が execution を取得しました。${options.execute ? "Codex CLI を起動します。" : "dry-run のため Codex CLI は起動しません。"}`);
 
   if (!options.execute) {
     await postEvent(options, {
@@ -49,6 +51,7 @@ export async function runOnce(config = {}) {
       progress: 100,
       notifications: ["VPS runner dry-run path is wired."]
     });
+    await postRunnerMessage(options, chat, "dry-run runner は正常に完了しました。queue claim と progress event の経路は通っています。");
     return { ok: true, status: "dry_run_completed", executionId: execution.executionId };
   }
 
@@ -58,6 +61,7 @@ export async function runOnce(config = {}) {
     currentStep: "Codex CLI is running the bounded task.",
     progress: 24
   });
+  await postRunnerMessage(options, chat, "Codex CLI 実行を開始しました。以降の詳細ログは保存せず、要点だけを返します。");
 
   const result = await runCodex(options, execution);
   if (result.ok) {
@@ -70,6 +74,7 @@ export async function runOnce(config = {}) {
       nextHumanAction: "merge_review",
       notifications: ["Codex CLI execution finished; human review is required."]
     });
+    await postRunnerMessage(options, chat, "Codex CLI 実行が完了しました。PR / evidence を確認して、人間の判断へ進めてください。");
     return { ok: true, status: "waiting_review", executionId: execution.executionId };
   }
 
@@ -83,6 +88,7 @@ export async function runOnce(config = {}) {
     nextHumanAction: "investigate",
     notifications: ["Codex CLI execution failed; investigation is required."]
   });
+  await postRunnerMessage(options, chat, `Codex CLI 実行が失敗しました。exit code は ${result.exitCode} です。raw log は dashboard に保存していません。`);
   return { ok: false, status: "failed", executionId: execution.executionId, exitCode: result.exitCode };
 }
 
@@ -120,6 +126,30 @@ async function postEvent(options, event) {
     method: "POST",
     body: event
   });
+}
+
+async function findExecutionChat(options, execution) {
+  const query = new URLSearchParams();
+  if (execution.executionId) query.set("executionId", execution.executionId);
+  const byExecution = await requestJson(options, `/api/chats?${query.toString()}`).catch(() => ({ chats: [] }));
+  if (byExecution.chats?.[0]) return byExecution.chats[0];
+
+  const fallback = new URLSearchParams();
+  fallback.set("repository", execution.repository);
+  if (execution.issueNumber) fallback.set("issueNumber", String(execution.issueNumber));
+  const byIssue = await requestJson(options, `/api/chats?${fallback.toString()}`).catch(() => ({ chats: [] }));
+  return byIssue.chats?.[0] || null;
+}
+
+async function postRunnerMessage(options, chat, message) {
+  if (!chat?.chatId) return null;
+  return requestJson(options, `/api/chats/${encodeURIComponent(chat.chatId)}/messages`, {
+    method: "POST",
+    body: {
+      role: "runner",
+      text: message
+    }
+  }).catch(() => null);
 }
 
 async function requestJson(options, path, init = {}) {

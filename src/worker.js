@@ -156,7 +156,8 @@ const issueCatalog = [
   { number: 5, title: "Dashboard から VPS Codex CLI へ開発を投げる", status: "open" },
   { number: 6, title: "vtdd.hibou-web.com の Cloudflare 移行検討", status: "open" },
   { number: 7, title: "v3 GitHub App 権限と runner 認証情報", status: "planned" },
-  { number: 8, title: "リポジトリ別の開発チャット", status: "open" }
+  { number: 8, title: "リポジトリ別の開発チャット", status: "open" },
+  { number: 9, title: "VPS Codex CLI の返事を開発チャットへ返す", status: "open" }
 ];
 
 export default {
@@ -227,9 +228,12 @@ export default {
     }
 
     if (url.pathname === "/api/chats" && request.method === "GET") {
-      const repository = normalizeText(url.searchParams.get("repository"));
-      const filtered = repository ? chats.filter((chat) => chat.repository === repository) : chats;
-      return json({ ok: true, chats: filtered });
+      return json({ ok: true, chats: filterChats(chats, url.searchParams) });
+    }
+
+    if (url.pathname === "/api/chats/search" && request.method === "GET") {
+      const results = searchChats(chats, url.searchParams);
+      return json({ ok: true, results });
     }
 
     if (url.pathname === "/api/chats" && request.method === "POST") {
@@ -242,6 +246,18 @@ export default {
       chats.unshift(chat);
       await saveChats(env, chats);
       return json({ ok: true, chat, chatUrl: `/chats/${encodeURIComponent(chat.chatId)}` }, 201);
+    }
+
+    const chatMessageMatch = url.pathname.match(/^\/api\/chats\/([^/]+)\/messages$/);
+    if (chatMessageMatch && request.method === "POST") {
+      const chatId = decodeURIComponent(chatMessageMatch[1]);
+      const body = await readBody(request);
+      const result = appendChatMessage(chats, chatId, body);
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveChats(env, chats);
+      return json({ ok: true, chat: result.chat, message: result.message }, 201);
     }
 
     if (url.pathname.startsWith("/api/chats/")) {
@@ -604,6 +620,7 @@ function renderRepositoryChats({ repository, chats, executions }) {
           <a class="button" href="/orchestrator">Dashboard</a>
           <a class="button" href="${escapeAttribute(repositoryUrl(repository))}">Repository</a>
           <a class="button" href="/api/chats?repository=${encodeURIComponent(repository)}">JSON</a>
+          <a class="button" href="/api/chats/search?q=${encodeURIComponent(repository)}">検索 JSON</a>
         </div>
       </section>
       <section>
@@ -661,6 +678,21 @@ function renderChatDetail({ chat, executions }) {
           <span>raw log / CoT / secret は保存しない</span>
         </div>
         <div class="stack">${chat.messages.map(renderChatMessage).join("")}</div>
+      </section>
+      <section class="card wide">
+        <h2>message を追加</h2>
+        <form method="post" action="/api/chats/${encodeURIComponent(chat.chatId)}/messages" class="form-grid">
+          <label>role
+            <select name="role">
+              <option value="owner">オーナー</option>
+              <option value="butler">Butler</option>
+              <option value="runner">Runner</option>
+              <option value="system">System</option>
+            </select>
+          </label>
+          <label>message <textarea name="text" rows="4" placeholder="この開発チャットに残すメッセージ"></textarea></label>
+          <button class="button primary" type="submit">message JSON を追加</button>
+        </form>
       </section>
     `
   });
@@ -904,6 +936,79 @@ function buildRepositorySummaries(executions, chats = []) {
     .sort((a, b) => Date.parse(b.latestExecution?.lastUpdatedAt || 0) - Date.parse(a.latestExecution?.lastUpdatedAt || 0));
 }
 
+function filterChats(chats, searchParams) {
+  const repository = normalizeText(searchParams.get("repository"));
+  const executionId = normalizeText(searchParams.get("executionId"));
+  const issueNumber = normalizeIssueNumber(searchParams.get("issueNumber"));
+  const q = normalizeText(searchParams.get("q")).toLowerCase();
+
+  return chats
+    .filter((chat) => !repository || chat.repository === repository)
+    .filter((chat) => !executionId || chat.executionId === executionId)
+    .filter((chat) => !issueNumber || chat.issueNumber === issueNumber)
+    .filter((chat) => !q || chatSearchText(chat).includes(q))
+    .sort(compareChatsByUpdatedAt);
+}
+
+function searchChats(chats, searchParams) {
+  const q = normalizeText(searchParams.get("q")).toLowerCase();
+  const filtered = filterChats(chats, searchParams);
+  if (!q) return filtered.map(chatSearchResult);
+  return filtered
+    .map((chat) => ({ ...chatSearchResult(chat), score: chatSearchScore(chat, q) }))
+    .filter((result) => result.score > 0)
+    .sort((a, b) => b.score - a.score || Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+}
+
+function chatSearchResult(chat) {
+  return {
+    chatId: chat.chatId,
+    chatUrl: `/chats/${encodeURIComponent(chat.chatId)}`,
+    repository: chat.repository,
+    issueNumber: chat.issueNumber,
+    prNumber: chat.prNumber,
+    executionId: chat.executionId,
+    title: chat.title,
+    status: chat.status,
+    summary: chat.summary,
+    updatedAt: chat.updatedAt,
+    tags: chat.tags
+  };
+}
+
+function chatSearchText(chat) {
+  return [
+    chat.chatId,
+    chat.repository,
+    chat.issueNumber,
+    chat.prNumber,
+    chat.executionId,
+    chat.title,
+    chat.summary,
+    chat.lastMessage,
+    ...(chat.tags || []),
+    ...(chat.messages || []).map((message) => message.text)
+  ].join(" ").toLowerCase();
+}
+
+function chatSearchScore(chat, q) {
+  const text = chatSearchText(chat);
+  let score = 0;
+  if (chat.title.toLowerCase().includes(q)) score += 8;
+  if (chat.summary.toLowerCase().includes(q)) score += 5;
+  if (chat.repository.toLowerCase().includes(q)) score += 4;
+  if (String(chat.issueNumber || "").includes(q)) score += 3;
+  if (String(chat.prNumber || "").includes(q)) score += 3;
+  if ((chat.executionId || "").toLowerCase().includes(q)) score += 6;
+  if ((chat.tags || []).some((tag) => tag.toLowerCase().includes(q))) score += 4;
+  if (text.includes(q)) score += 1;
+  return score;
+}
+
+function compareChatsByUpdatedAt(a, b) {
+  return Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0);
+}
+
 function validateChatInput(body) {
   const forbiddenField = forbiddenChatFields.find((field) => Object.prototype.hasOwnProperty.call(body, field));
   if (forbiddenField) {
@@ -924,6 +1029,43 @@ function validateChatInput(body) {
   }
 
   return { ok: true };
+}
+
+function validateChatMessageInput(body) {
+  const forbiddenField = forbiddenChatFields.find((field) => Object.prototype.hasOwnProperty.call(body, field));
+  if (forbiddenField) {
+    return { ok: false, error: "forbidden_chat_field", field: forbiddenField };
+  }
+  if (!normalizeText(body.text || body.message)) {
+    return { ok: false, error: "message_required" };
+  }
+  return { ok: true };
+}
+
+function appendChatMessage(chats, chatId, body) {
+  const validation = validateChatMessageInput(body);
+  if (!validation.ok) {
+    return { ...validation, statusCode: 400 };
+  }
+  const index = chats.findIndex((chat) => chat.chatId === chatId);
+  if (index < 0) {
+    return { ok: false, error: "chat_not_found", chatId, statusCode: 404 };
+  }
+
+  const now = new Date().toISOString();
+  const message = normalizeChatMessage({
+    role: normalizeText(body.role) || "owner",
+    text: normalizeText(body.text || body.message).slice(0, 1200),
+    createdAt: body.createdAt || now
+  });
+  const chat = normalizeChat({
+    ...chats[index],
+    lastMessage: message.text,
+    updatedAt: now,
+    messages: [...(chats[index].messages || []), message]
+  });
+  chats[index] = chat;
+  return { ok: true, chat, message };
 }
 
 function buildChatRecord(body) {
@@ -1335,7 +1477,8 @@ function page({ title, body }) {
     .row-link em { color:#64736c; font-style:normal; font-size:13px; }
     .form-grid { display:grid; gap:12px; }
     label { display:grid; gap:5px; color:#52635b; }
-    input, select { min-height:38px; border:1px solid #cbd5cc; border-radius:6px; padding:0 10px; font:inherit; background:#fff; }
+    input, select, textarea { min-height:38px; border:1px solid #cbd5cc; border-radius:6px; padding:8px 10px; font:inherit; background:#fff; }
+    textarea { resize:vertical; line-height:1.45; }
     .dispatch-form { margin-top:16px; padding-top:16px; border-top:1px solid #e1e6df; }
   </style>
 </head>

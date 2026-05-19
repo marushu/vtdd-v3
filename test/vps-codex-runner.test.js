@@ -48,6 +48,15 @@ test("runOnce claims queue and posts dry-run progress events", async () => {
     if (url.endsWith("/api/execution-events")) {
       return jsonResponse({ ok: true });
     }
+    if (url.endsWith("/api/chats?executionId=remote-codex-v3-5")) {
+      return jsonResponse({
+        ok: true,
+        chats: [{ chatId: "chat-vtdd-v3-issue5" }]
+      });
+    }
+    if (url.endsWith("/api/chats/chat-vtdd-v3-issue5/messages")) {
+      return jsonResponse({ ok: true });
+    }
     return jsonResponse({ ok: false, error: "unexpected" }, 404);
   };
 
@@ -64,6 +73,12 @@ test("runOnce claims queue and posts dry-run progress events", async () => {
     .map((call) => JSON.parse(call.init.body));
   assert.deepEqual(eventBodies.map((body) => body.phase), ["codex_starting", "completed"]);
   assert.equal(eventBodies.some((body) => Object.prototype.hasOwnProperty.call(body, "rawLog")), false);
+
+  const chatMessages = calls
+    .filter((call) => call.url.endsWith("/api/chats/chat-vtdd-v3-issue5/messages"))
+    .map((call) => JSON.parse(call.init.body));
+  assert.deepEqual(chatMessages.map((body) => body.role), ["runner", "runner"]);
+  assert.equal(chatMessages.some((body) => Object.prototype.hasOwnProperty.call(body, "rawLog")), false);
 });
 
 function jsonResponse(body, status = 200) {
