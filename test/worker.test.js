@@ -467,7 +467,13 @@ test("dashboard Butler queues owner instruction and returns progress/chat URLs",
   const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
   const page = await worker.fetch(new Request("https://example.com/butler"), env);
   assert.equal(page.status, 200);
-  assert.equal((await page.text()).includes("Butler に開発指示"), true);
+  const pageHtml = await page.text();
+  assert.equal(pageHtml.includes("Butler に開発指示"), true);
+  assert.equal(pageHtml.includes("執事長の声"), true);
+  assert.equal(pageHtml.includes("device_speech_synthesis"), true);
+  assert.equal(pageHtml.includes("speechSynthesis"), true);
+  assert.equal(pageHtml.includes("呼称を確認して保存"), true);
+  assert.equal(pageHtml.includes("外部 TTS"), false);
 
   const response = await worker.fetch(
     new Request("https://example.com/api/butler/dispatch", {

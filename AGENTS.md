@@ -28,6 +28,7 @@ Product goal は、オーナーが ChatGPT thread history を source of truth �
 - passkey cancel / timeout / scope mismatch は action を実行せず、decision queue に戻す。
 - 運転中や hands-free 利用では、high-risk action の実行ではなく decision queue / 後続確認へ送る。
 - dashboard に chain-of-thought、full terminal logs、secrets、tokens、approval grant values、raw sensitive material を出さない。
+- Butler persona は初期 `head_butler_elder_calm`。初期呼称は `ご主人様` とし、owner が確認した呼称だけを設定値として保存する。
 
 ## 日本語運用ルール
 

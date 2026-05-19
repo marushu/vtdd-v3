@@ -182,7 +182,8 @@ const issueCatalog = [
   { number: 17, title: "同一 repository 並行開発の conflict-aware scheduler", status: "planned" },
   { number: 18, title: "Codex Security を reviewer signal として取り込む", status: "planned" },
   { number: 19, title: "外部 repository onboarding と Butler repository read/develop readiness", status: "planned" },
-  { number: 20, title: "GitHub App manifest から repository 用 app / installation を guided auto-provision する", status: "planned" }
+  { number: 20, title: "GitHub App manifest から repository 用 app / installation を guided auto-provision する", status: "planned" },
+  { number: 23, title: "Butler voice persona と owner 呼称 onboarding", status: "planned" }
 ];
 
 export default {
@@ -804,8 +805,34 @@ function renderButler({ url }) {
         </div>
       </section>
       <section class="card wide">
+        <h2>執事長の声</h2>
+        <p id="butler-voice-status" class="muted">端末の日本語音声を確認しています。</p>
+        <div class="form-grid">
+          <label>呼び方 <input id="butler-call-name" name="callName" value="ご主人様" autocomplete="nickname"></label>
+          <label>声
+            <select id="butler-voice-select" name="voiceName">
+              <option value="">端末の日本語音声を自動選択</option>
+            </select>
+          </label>
+          <label>声の傾向
+            <select id="butler-gender-preference" name="genderPreference">
+              <option value="male">男性っぽい声を優先</option>
+              <option value="female">女性っぽい声を優先</option>
+              <option value="auto">自動</option>
+            </select>
+          </label>
+          <label>話す速さ <input id="butler-rate" type="range" min="0.7" max="1.1" step="0.05" value="0.9"></label>
+          <label>声の高さ <input id="butler-pitch" type="range" min="0.6" max="1.2" step="0.05" value="0.85"></label>
+          <div class="actions">
+            <button class="button" type="button" id="butler-preview-voice">試聴</button>
+            <button class="button primary" type="button" id="butler-save-profile">呼称を確認して保存</button>
+          </div>
+        </div>
+        <p id="butler-profile-confirmation" class="muted">初期呼称は「ご主人様」です。保存前に復唱して確認します。</p>
+      </section>
+      <section class="card wide">
         <h2>開発指示を送る</h2>
-        <form method="post" action="/api/butler/dispatch" class="form-grid">
+        <form method="post" action="/api/butler/dispatch" class="form-grid" id="butler-dispatch-form">
           <label>Repository <input name="repository" value="marushu/vtdd-v3"></label>
           <label>Issue <input name="issueNumber" value="14"></label>
           <label>作業種別
@@ -820,12 +847,149 @@ function renderButler({ url }) {
           <label>Butler への指示 <textarea name="message" rows="6" placeholder="例: dashboard から VPS runner に開発指示を投げて、progress と chat URL を返して"></textarea></label>
           <button class="button primary" type="submit">queue に積む</button>
         </form>
+        <div id="butler-dispatch-result" class="notice" hidden></div>
         <p class="muted">Worker origin: ${escapeHtml(url.origin)}</p>
       </section>
       <section class="notice">
         <h2>今できること</h2>
         <p>この Butler はまだ LLM 判断や repo 読解をしません。指示を安全な queue record と chat に変換し、runner が拾える状態にします。高リスク操作は拒否します。</p>
       </section>
+      <script>
+        (() => {
+          const profileKey = "vtdd:v3:butler-profile";
+          const status = document.getElementById("butler-voice-status");
+          const voiceSelect = document.getElementById("butler-voice-select");
+          const callNameInput = document.getElementById("butler-call-name");
+          const genderPreference = document.getElementById("butler-gender-preference");
+          const rateInput = document.getElementById("butler-rate");
+          const pitchInput = document.getElementById("butler-pitch");
+          const confirmation = document.getElementById("butler-profile-confirmation");
+          const result = document.getElementById("butler-dispatch-result");
+          const form = document.getElementById("butler-dispatch-form");
+
+          const loadProfile = () => {
+            try {
+              return JSON.parse(localStorage.getItem(profileKey) || "{}");
+            } catch {
+              return {};
+            }
+          };
+
+          const saveProfile = (profile) => {
+            localStorage.setItem(profileKey, JSON.stringify({
+              personaPreset: "head_butler_elder_calm",
+              voiceProvider: "device_speech_synthesis",
+              callName: profile.callName || "ご主人様",
+              voiceName: profile.voiceName || "",
+              genderPreference: profile.genderPreference || "male",
+              rate: Number(profile.rate || 0.9),
+              pitch: Number(profile.pitch || 0.85),
+              confirmedAt: new Date().toISOString()
+            }));
+          };
+
+          const currentProfile = () => ({
+            callName: callNameInput.value.trim() || "ご主人様",
+            voiceName: voiceSelect.value,
+            genderPreference: genderPreference.value,
+            rate: Number(rateInput.value || 0.9),
+            pitch: Number(pitchInput.value || 0.85)
+          });
+
+          const voiceScore = (voice, preference) => {
+            const name = voice.name.toLowerCase();
+            let score = voice.lang.toLowerCase().startsWith("ja") ? 20 : 0;
+            if (preference === "male" && /(male|男|otoya|kyoko male|ichiro|takumi|kazuya|nobu|osamu)/i.test(voice.name)) score += 8;
+            if (preference === "female" && /(female|女|kyoko|otome|sayaka|haruka|nanami|yuna|sakura)/i.test(voice.name)) score += 8;
+            if (name.includes("compact")) score -= 2;
+            return score;
+          };
+
+          const selectBestVoice = () => {
+            const voices = speechSynthesis.getVoices();
+            const selectedName = voiceSelect.value || loadProfile().voiceName;
+            if (selectedName) return voices.find((voice) => voice.name === selectedName) || null;
+            return voices
+              .filter((voice) => voice.lang.toLowerCase().startsWith("ja"))
+              .sort((a, b) => voiceScore(b, genderPreference.value) - voiceScore(a, genderPreference.value))[0] || null;
+          };
+
+          const speak = (text) => {
+            if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+              status.textContent = "この端末では音声出力が使えません。テキストで続行します。";
+              return false;
+            }
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = "ja-JP";
+            utterance.rate = Number(rateInput.value || 0.9);
+            utterance.pitch = Number(pitchInput.value || 0.85);
+            utterance.volume = 1;
+            const voice = selectBestVoice();
+            if (voice) utterance.voice = voice;
+            window.speechSynthesis.speak(utterance);
+            return true;
+          };
+
+          const populateVoices = () => {
+            if (!("speechSynthesis" in window)) {
+              status.textContent = "この端末では音声出力が使えません。テキストで続行します。";
+              return;
+            }
+            const profile = loadProfile();
+            const voices = speechSynthesis.getVoices().filter((voice) => voice.lang.toLowerCase().startsWith("ja"));
+            voiceSelect.textContent = "";
+            voiceSelect.append(new Option("端末の日本語音声を自動選択", ""));
+            voices.forEach((voice) => voiceSelect.append(new Option(voice.name + " / " + voice.lang, voice.name)));
+            callNameInput.value = profile.callName || "ご主人様";
+            genderPreference.value = profile.genderPreference || "male";
+            rateInput.value = profile.rate || 0.9;
+            pitchInput.value = profile.pitch || 0.85;
+            if (profile.voiceName) voiceSelect.value = profile.voiceName;
+            status.textContent = voices.length
+              ? "端末で使える日本語音声が " + voices.length + " 件あります。試聴して選べます。"
+              : "日本語音声が見つかりません。端末設定の音声、またはテキスト表示にフォールバックします。";
+          };
+
+          document.getElementById("butler-preview-voice").addEventListener("click", () => {
+            const profile = currentProfile();
+            speak(profile.callName + "、執事長の Butler と申します。落ち着いて、順番に進めてまいります。");
+          });
+
+          document.getElementById("butler-save-profile").addEventListener("click", () => {
+            const profile = currentProfile();
+            confirmation.textContent = "承知いたしました。今後は「" + profile.callName + "」とお呼びします。";
+            saveProfile(profile);
+            speak("承知いたしました。今後は、" + profile.callName + "、とお呼びします。");
+          });
+
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            result.hidden = false;
+            result.textContent = "Butler が queue に積んでいます。";
+            const response = await fetch(form.action, {
+              method: "POST",
+              body: new FormData(form)
+            });
+            const body = await response.json();
+            if (!response.ok) {
+              const text = body.error === "high_risk_intent_requires_decision_queue"
+                ? "高リスク操作のため、GO と passkey の判断キューに回します。"
+                : "queue 作成に失敗しました。";
+              result.textContent = text;
+              speak(text);
+              return;
+            }
+            result.innerHTML = '<h3>queue に積みました</h3><p>progress と chat を開けます。</p><div class="actions"><a class="button" href="' + body.progressUrl + '">進捗</a><a class="button" href="' + body.chatUrl + '">チャット</a><a class="button" href="' + body.dashboardUrl + '">Dashboard</a></div>';
+            speak((currentProfile().callName || "ご主人様") + "、開発指示を queue に積みました。進捗ページとチャットを用意しました。");
+          });
+
+          populateVoices();
+          if ("speechSynthesis" in window) {
+            speechSynthesis.onvoiceschanged = populateVoices;
+          }
+        })();
+      </script>
     `
   });
 }
