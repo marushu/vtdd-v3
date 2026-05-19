@@ -204,6 +204,10 @@ export default {
       return html(renderNotifications({ executions }));
     }
 
+    if (url.pathname === "/butler") {
+      return html(renderButler({ url }));
+    }
+
     if (url.pathname === "/dispatch") {
       return html(renderDispatch({ url }));
     }
@@ -333,6 +337,28 @@ export default {
         dispatch: dispatch.queue,
         execution: dispatch.execution,
         progressUrl: dispatch.progressUrl
+      }, 202);
+    }
+
+    if (url.pathname === "/api/butler/dispatch" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = buildButlerDispatch({ body, origin: url.origin });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      executions.unshift(result.execution);
+      chats.unshift(result.chat);
+      await saveExecutions(env, executions);
+      await saveChats(env, chats);
+      return json({
+        ok: true,
+        intent: result.intent,
+        dispatch: result.queue,
+        execution: result.execution,
+        chat: result.chat,
+        progressUrl: result.progressUrl,
+        chatUrl: result.chatUrl,
+        dashboardUrl: `${url.origin}/orchestrator`
       }, 202);
     }
 
@@ -554,6 +580,7 @@ function renderDashboard({ executions, chats, env, url }) {
         </div>
         <div class="actions hero-actions">
           <a class="button primary" href="/dispatch">開発を投げる</a>
+          <a class="button primary" href="/butler">Butler に指示</a>
           <a class="button" href="/decisions">判断待ち</a>
           <a class="button" href="/notifications">通知</a>
           <a class="button" href="/api/executions">JSON</a>
@@ -593,6 +620,7 @@ function renderProgress({ execution }) {
   const issueUrl = issueUrlFor(execution);
   return page({
     title: `${execution.executionId} - VTDD progress`,
+    refreshSeconds: ["queued", "running", "waiting"].includes(execution.status) ? 10 : null,
     body: `
       <section class="hero">
         <p class="eyebrow">${escapeHtml(execution.repository)} #${escapeHtml(execution.issueNumber)}</p>
@@ -656,6 +684,7 @@ function renderChatDetail({ chat, executions }) {
   const execution = executions.find((item) => item.executionId === chat.executionId);
   return page({
     title: `${chat.chatId} - VTDD chat`,
+    refreshSeconds: ["active", "pinned"].includes(chat.status) ? 12 : null,
     body: `
       <section class="hero">
         <p class="eyebrow">${escapeHtml(chat.repository)} / ${escapeHtml(displayChatStatus(chat.status))}</p>
@@ -704,6 +733,47 @@ function renderChatDetail({ chat, executions }) {
           <label>message <textarea name="text" rows="4" placeholder="この開発チャットに残すメッセージ"></textarea></label>
           <button class="button primary" type="submit">message JSON を追加</button>
         </form>
+      </section>
+    `
+  });
+}
+
+function renderButler({ url }) {
+  return page({
+    title: "VTDD Butler",
+    body: `
+      <section class="hero">
+        <p class="eyebrow">Dashboard Butler</p>
+        <h1>Butler に開発指示</h1>
+        <p>ここは VPS / local runner への窓口です。自然文の指示を chat に残し、低リスクの実装・調査・docs・tests・review を queue に積み、progress URL を即返します。</p>
+        <div class="actions hero-actions">
+          <a class="button" href="/orchestrator">Dashboard</a>
+          <a class="button" href="/dispatch">Dispatch</a>
+          <a class="button" href="/api/runner/queue?limit=5">Runner queue JSON</a>
+        </div>
+      </section>
+      <section class="card wide">
+        <h2>開発指示を送る</h2>
+        <form method="post" action="/api/butler/dispatch" class="form-grid">
+          <label>Repository <input name="repository" value="marushu/vtdd-v3"></label>
+          <label>Issue <input name="issueNumber" value="14"></label>
+          <label>作業種別
+            <select name="taskType">
+              <option value="implementation">実装</option>
+              <option value="investigation">調査</option>
+              <option value="docs">ドキュメント</option>
+              <option value="tests">テスト</option>
+              <option value="review">レビュー</option>
+            </select>
+          </label>
+          <label>Butler への指示 <textarea name="message" rows="6" placeholder="例: dashboard から VPS runner に開発指示を投げて、progress と chat URL を返して"></textarea></label>
+          <button class="button primary" type="submit">queue に積む</button>
+        </form>
+        <p class="muted">Worker origin: ${escapeHtml(url.origin)}</p>
+      </section>
+      <section class="notice">
+        <h2>今できること</h2>
+        <p>この Butler はまだ LLM 判断や repo 読解をしません。指示を安全な queue record と chat に変換し、runner が拾える状態にします。高リスク操作は拒否します。</p>
       </section>
     `
   });
@@ -1214,6 +1284,95 @@ function buildDispatchRecord({ body, origin }) {
   };
 }
 
+function buildButlerDispatch({ body, origin }) {
+  const intent = resolveButlerIntent(body);
+  if (!intent.ok) return intent;
+  const branch = normalizeText(body.branch) || `codex/issue-${intent.issueNumber || "adhoc"}`;
+  const dispatch = buildDispatchRecord({
+    body: {
+      repository: intent.repository,
+      issueNumber: intent.issueNumber,
+      branch,
+      taskType: intent.taskType,
+      task: intent.task
+    },
+    origin
+  });
+  const chat = buildChatRecord({
+    repository: intent.repository,
+    issueNumber: intent.issueNumber,
+    executionId: dispatch.execution.executionId,
+    title: `Butler dispatch: ${intent.task.slice(0, 80)}`,
+    status: "active",
+    summary: `Butler が ${intent.taskType} 指示を runner queue に積みました。progress と chat URL から追跡できます。`,
+    message: intent.message,
+    tags: ["butler", "dispatch", intent.taskType]
+  });
+  return {
+    ok: true,
+    intent,
+    execution: {
+      ...dispatch.execution,
+      currentStep: `Butler queued ${intent.taskType} task for runner pickup.`,
+      notifications: mergeNotifications(dispatch.execution.notifications, ["Butler dispatch created progress and chat URLs."])
+    },
+    queue: dispatch.queue,
+    progressUrl: dispatch.progressUrl,
+    chat,
+    chatUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`
+  };
+}
+
+function resolveButlerIntent(body) {
+  const message = normalizeText(body.message || body.task).slice(0, 1600);
+  const repository = normalizeText(body.repository);
+  const taskType = normalizeText(body.taskType) || classifyTaskType(message);
+  const issueNumber = normalizeIssueNumber(body.issueNumber);
+  if (!repository) {
+    return { ok: false, error: "repository_required", statusCode: 400 };
+  }
+  if (!message) {
+    return { ok: false, error: "message_required", statusCode: 400 };
+  }
+  if (containsHighRiskIntent(message)) {
+    return {
+      ok: false,
+      error: "high_risk_intent_requires_decision_queue",
+      statusCode: 400,
+      authority: "GO + passkey required"
+    };
+  }
+  const validation = validateDispatch({ repository, task: message, taskType });
+  if (!validation.ok) {
+    return { ...validation, statusCode: 400 };
+  }
+  return {
+    ok: true,
+    intentType: taskType === "investigation" ? "investigate" : taskType,
+    repository,
+    issueNumber,
+    taskType,
+    task: message.slice(0, 240),
+    message,
+    authority: "low-risk dispatch only; high-risk actions stay in decision queue"
+  };
+}
+
+function containsHighRiskIntent(message) {
+  return /(merge|deploy|close\s*issue|credential|secret|dns|delete|destroy|マージ|デプロイ|クローズ|閉じ|認証情報|シークレット|削除|破壊)/i.test(
+    normalizeText(message)
+  );
+}
+
+function classifyTaskType(message) {
+  const text = normalizeText(message).toLowerCase();
+  if (/(調査|確認|investigate|check|調べ)/i.test(text)) return "investigation";
+  if (/(test|テスト|検証)/i.test(text)) return "tests";
+  if (/(doc|docs|ドキュメント|readme)/i.test(text)) return "docs";
+  if (/(review|レビュー)/i.test(text)) return "review";
+  return "implementation";
+}
+
 function claimExecution({ executions, body, origin }) {
   const executionId = normalizeText(body.executionId);
   const runnerId = normalizeText(body.runnerId).slice(0, 80) || "vps-codex-runner";
@@ -1439,12 +1598,14 @@ function displayMessageRole(role) {
   }[role] || role;
 }
 
-function page({ title, body }) {
+function page({ title, body, refreshSeconds = null }) {
+  const refresh = refreshSeconds ? `<meta http-equiv="refresh" content="${escapeAttribute(refreshSeconds)}">` : "";
   return `<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${refresh}
   <title>${escapeHtml(title)}</title>
   <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#f7f8f5; color:#1c2326; }

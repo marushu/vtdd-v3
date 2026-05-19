@@ -12,6 +12,7 @@ dashboard を開いたまま、runner progress と chat message が更新され�
 
 - chat detail / progress page が定期 refresh または SSE / WebSocket で更新される。
 - 初期 MVP では polling でもよい。
+- 初期 MVP では active chat と queued/running/waiting progress page に軽量 refresh を入れる。
 - 更新時に scroll / layout が破綻しない。
 - failure / blocker / decision waiting が目立つ。
 - iPhone で見ても負荷が高すぎない。
@@ -25,4 +26,5 @@ dashboard を開いたまま、runner progress と chat message が更新され�
 ## 検証
 
 - polling または realtime update の browser smoke test。
+- progress / chat page に refresh metadata が入る test。
 - mobile viewport 確認。

@@ -392,6 +392,60 @@ test("dashboard dispatch creates a queued execution without high-risk action", a
   assert.equal(html.includes("queued"), true);
 });
 
+test("dashboard Butler queues owner instruction and returns progress/chat URLs", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const page = await worker.fetch(new Request("https://example.com/butler"), env);
+  assert.equal(page.status, 200);
+  assert.equal((await page.text()).includes("Butler に開発指示"), true);
+
+  const response = await worker.fetch(
+    new Request("https://example.com/api/butler/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 14,
+        message: "dashboard Butler から runner queue に開発指示を投げられるようにして"
+      })
+    }),
+    env
+  );
+  assert.equal(response.status, 202);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.intent.intentType, "implementation");
+  assert.equal(body.dispatch.status, "queued");
+  assert.equal(body.progressUrl.includes("/progress/"), true);
+  assert.equal(body.chatUrl.includes("/chats/"), true);
+  assert.equal(body.chat.executionId, body.execution.executionId);
+
+  const queue = await worker.fetch(new Request("https://example.com/api/runner/queue?limit=1"), env);
+  const queueBody = await queue.json();
+  assert.equal(queueBody.queue[0].executionId, body.execution.executionId);
+
+  const chat = await worker.fetch(new Request(body.chatUrl), env);
+  assert.equal(chat.status, 200);
+  assert.equal((await chat.text()).includes("dashboard Butler から runner queue"), true);
+});
+
+test("dashboard Butler refuses high-risk natural-language intent", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/api/butler/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 14,
+        message: "本番にデプロイして"
+      })
+    }),
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
+  );
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "high_risk_intent_requires_decision_queue");
+});
+
 test("dashboard dispatch rejects high-risk task types", async () => {
   const response = await worker.fetch(
     new Request("https://example.com/api/dispatch", {
