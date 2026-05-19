@@ -1,3 +1,54 @@
+const EXECUTION_STORE_KEY = "vtdd:v3:executions";
+
+const allowedPhases = [
+  "queued",
+  "picked_up",
+  "codex_starting",
+  "planning",
+  "editing_files",
+  "running_tests",
+  "pushing_branch",
+  "creating_pr",
+  "waiting_review",
+  "completed",
+  "failed",
+  "canceled",
+  "stale"
+];
+
+const allowedStatuses = ["queued", "running", "waiting", "completed", "failed", "canceled", "stale"];
+
+const safeEventFields = [
+  "executionId",
+  "repository",
+  "issueNumber",
+  "title",
+  "branch",
+  "status",
+  "phase",
+  "progress",
+  "currentStep",
+  "touchedFiles",
+  "prUrl",
+  "blocker",
+  "timestamp",
+  "nextHumanAction",
+  "returnThreadUrl",
+  "notifications"
+];
+
+const forbiddenEventFields = [
+  "rawLog",
+  "terminalStream",
+  "chainOfThought",
+  "secret",
+  "token",
+  "approvalGrant",
+  "approvalGrantId",
+  "password",
+  "privateKey"
+];
+
 const sampleExecutions = [
   {
     executionId: "remote-codex-issue426-1f5bdj",
@@ -23,7 +74,7 @@ const sampleExecutions = [
     title: "Deploy operator repositoryInput guard",
     branch: "codex/fix-deploy-operator-repo-required",
     status: "completed",
-    phase: "pr_ready",
+    phase: "completed",
     progress: 100,
     currentStep: "Merged and deployed. Runtime guard is live.",
     prUrl: "https://github.com/marushu/vtdd-v2-p/pull/425",
@@ -40,7 +91,7 @@ const sampleExecutions = [
     title: "Cloudflare Orchestrator Dashboard MVP",
     branch: "main",
     status: "running",
-    phase: "deploying_dashboard",
+    phase: "running_tests",
     progress: 76,
     currentStep: "Publishing the first dashboard Worker URL.",
     prUrl: "https://github.com/marushu/vtdd-v3",
@@ -65,17 +116,18 @@ const issueCatalog = [
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const executions = await listExecutions(env);
 
     if (url.pathname === "/" || url.pathname === "/orchestrator") {
-      return html(renderDashboard({ executions: sampleExecutions, env, url }));
+      return html(renderDashboard({ executions, env, url }));
     }
 
     if (url.pathname === "/decisions") {
-      return html(renderDecisions({ executions: sampleExecutions }));
+      return html(renderDecisions({ executions }));
     }
 
     if (url.pathname === "/notifications") {
-      return html(renderNotifications({ executions: sampleExecutions }));
+      return html(renderNotifications({ executions }));
     }
 
     if (url.pathname === "/dispatch") {
@@ -84,7 +136,7 @@ export default {
 
     if (url.pathname.startsWith("/progress/")) {
       const executionId = decodeURIComponent(url.pathname.slice("/progress/".length));
-      const execution = sampleExecutions.find((item) => item.executionId === executionId);
+      const execution = executions.find((item) => item.executionId === executionId);
       if (!execution) {
         return json({ ok: false, error: "execution_not_found", executionId }, 404);
       }
@@ -92,12 +144,12 @@ export default {
     }
 
     if (url.pathname === "/api/executions") {
-      return json({ ok: true, executions: sampleExecutions });
+      return json({ ok: true, executions });
     }
 
     if (url.pathname.startsWith("/api/executions/")) {
       const executionId = decodeURIComponent(url.pathname.slice("/api/executions/".length));
-      const execution = sampleExecutions.find((item) => item.executionId === executionId);
+      const execution = executions.find((item) => item.executionId === executionId);
       if (!execution) {
         return json({ ok: false, error: "execution_not_found", executionId }, 404);
       }
@@ -105,11 +157,44 @@ export default {
     }
 
     if (url.pathname === "/api/decisions") {
-      return json({ ok: true, decisions: buildDecisionItems(sampleExecutions) });
+      return json({ ok: true, decisions: buildDecisionItems(executions) });
     }
 
     if (url.pathname === "/api/notifications") {
-      return json({ ok: true, notifications: buildNotifications(sampleExecutions) });
+      return json({ ok: true, notifications: buildNotifications(executions) });
+    }
+
+    if (url.pathname === "/api/event-contract") {
+      return json({
+        ok: true,
+        contract: {
+          allowedPhases,
+          allowedStatuses,
+          safeEventFields,
+          forbiddenEventFields,
+          persistence: env?.EXECUTION_STORE ? "kv" : "sample_fallback"
+        }
+      });
+    }
+
+    if (url.pathname === "/api/execution-events" && request.method === "POST") {
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== "object") {
+        return json({ ok: false, error: "invalid_json" }, 400);
+      }
+
+      const validation = validateExecutionEvent(body);
+      if (!validation.ok) {
+        return json(validation, 400);
+      }
+
+      const execution = applyExecutionEvent(executions, body, url.origin);
+      await saveExecutions(env, executions);
+      return json({
+        ok: true,
+        execution,
+        progressUrl: `${url.origin}/progress/${encodeURIComponent(execution.executionId)}`
+      }, execution.createdFromEvent ? 201 : 200);
     }
 
     if (url.pathname === "/api/dispatch/preview" && request.method === "POST") {
@@ -129,6 +214,122 @@ export default {
     return json({ ok: false, error: "not_found" }, 404);
   }
 };
+
+async function listExecutions(env) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) {
+    return sampleExecutions.map((execution) => ({ ...execution }));
+  }
+
+  const raw = await store.get(EXECUTION_STORE_KEY);
+  if (!raw) {
+    return sampleExecutions.map((execution) => ({ ...execution }));
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((execution) => normalizeStoredExecution(execution));
+    }
+  } catch {
+    return sampleExecutions.map((execution) => ({ ...execution }));
+  }
+
+  return sampleExecutions.map((execution) => ({ ...execution }));
+}
+
+async function saveExecutions(env, executions) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(EXECUTION_STORE_KEY, JSON.stringify(executions.map(stripRuntimeOnlyFields)));
+  return true;
+}
+
+function validateExecutionEvent(event) {
+  const forbiddenField = forbiddenEventFields.find((field) => Object.prototype.hasOwnProperty.call(event, field));
+  if (forbiddenField) {
+    return { ok: false, error: "forbidden_event_field", field: forbiddenField };
+  }
+
+  if (!normalizeText(event.executionId)) {
+    return { ok: false, error: "executionId_required" };
+  }
+
+  if (!normalizeText(event.repository)) {
+    return { ok: false, error: "repository_required" };
+  }
+
+  if (!allowedPhases.includes(normalizeText(event.phase))) {
+    return { ok: false, error: "unsupported_phase", allowedPhases };
+  }
+
+  const status = normalizeText(event.status);
+  if (status && !allowedStatuses.includes(status)) {
+    return { ok: false, error: "unsupported_status", allowedStatuses };
+  }
+
+  return { ok: true };
+}
+
+function applyExecutionEvent(executions, event, origin) {
+  const executionId = normalizeText(event.executionId);
+  const index = executions.findIndex((item) => item.executionId === executionId);
+  const now = normalizeTimestamp(event.timestamp);
+  const existing = index >= 0 ? executions[index] : null;
+  const next = {
+    executionId,
+    repository: normalizeText(event.repository),
+    issueNumber: normalizeIssueNumber(event.issueNumber ?? existing?.issueNumber),
+    title: normalizeText(event.title) || existing?.title || "Untitled VTDD execution",
+    branch: normalizeText(event.branch) || existing?.branch || "unknown",
+    status: normalizeText(event.status) || statusForPhase(event.phase),
+    phase: normalizeText(event.phase),
+    progress: normalizeProgress(event.progress ?? existing?.progress ?? progressForPhase(event.phase)),
+    currentStep: normalizeText(event.currentStep) || existing?.currentStep || phaseLabel(event.phase),
+    touchedFiles: normalizeStringList(event.touchedFiles ?? existing?.touchedFiles),
+    prUrl: normalizeUrl(event.prUrl, origin) || existing?.prUrl || null,
+    blocker: normalizeText(event.blocker) || null,
+    lastUpdatedAt: now,
+    nextHumanAction: normalizeText(event.nextHumanAction) || existing?.nextHumanAction || nextHumanActionForPhase(event.phase),
+    returnThreadUrl: normalizeUrl(event.returnThreadUrl, origin) || existing?.returnThreadUrl || null,
+    notifications: mergeNotifications(existing?.notifications, event.notifications, event.currentStep),
+    createdFromEvent: index < 0
+  };
+
+  if (index >= 0) {
+    executions[index] = next;
+  } else {
+    executions.unshift(next);
+  }
+
+  return next;
+}
+
+function normalizeStoredExecution(execution) {
+  return {
+    executionId: normalizeText(execution.executionId),
+    repository: normalizeText(execution.repository),
+    issueNumber: normalizeIssueNumber(execution.issueNumber),
+    title: normalizeText(execution.title) || "Untitled VTDD execution",
+    branch: normalizeText(execution.branch) || "unknown",
+    status: allowedStatuses.includes(execution.status) ? execution.status : "running",
+    phase: allowedPhases.includes(execution.phase) ? execution.phase : "queued",
+    progress: normalizeProgress(execution.progress),
+    currentStep: normalizeText(execution.currentStep),
+    touchedFiles: normalizeStringList(execution.touchedFiles),
+    prUrl: normalizeText(execution.prUrl) || null,
+    blocker: normalizeText(execution.blocker) || null,
+    lastUpdatedAt: normalizeTimestamp(execution.lastUpdatedAt),
+    nextHumanAction: normalizeText(execution.nextHumanAction) || "wait",
+    returnThreadUrl: normalizeText(execution.returnThreadUrl) || null,
+    notifications: normalizeStringList(execution.notifications)
+  };
+}
+
+function stripRuntimeOnlyFields(execution) {
+  const { createdFromEvent, ...safeExecution } = execution;
+  return safeExecution;
+}
 
 function renderDashboard({ executions, env, url }) {
   const cards = executions.map(renderExecutionCard).join("");
@@ -274,6 +475,7 @@ function renderExecutionCard(execution, options = {}) {
         <div><dt>Next</dt><dd>${escapeHtml(execution.nextHumanAction)}</dd></div>
       </dl>
       <p>${escapeHtml(execution.currentStep)}</p>
+      ${(execution.touchedFiles || []).length ? `<p class="muted">Files: ${escapeHtml(execution.touchedFiles.join(", "))}</p>` : ""}
       ${blocker}
       <div class="actions">
         <a class="button" href="${escapeAttribute(href)}">Progress</a>
@@ -340,6 +542,99 @@ function buildDispatchPreview({ body, origin }) {
     },
     authority: "dispatch preview only; execution writes require governed queue integration"
   };
+}
+
+function statusForPhase(phase) {
+  if (phase === "completed") return "completed";
+  if (phase === "failed") return "failed";
+  if (phase === "canceled") return "canceled";
+  if (phase === "stale") return "stale";
+  if (phase === "queued") return "queued";
+  if (phase === "waiting_review") return "waiting";
+  return "running";
+}
+
+function progressForPhase(phase) {
+  const progressMap = {
+    queued: 2,
+    picked_up: 8,
+    codex_starting: 14,
+    planning: 24,
+    editing_files: 45,
+    running_tests: 68,
+    pushing_branch: 78,
+    creating_pr: 86,
+    waiting_review: 92,
+    completed: 100,
+    failed: 100,
+    canceled: 100,
+    stale: 100
+  };
+  return progressMap[phase] ?? 0;
+}
+
+function phaseLabel(phase) {
+  return {
+    queued: "Queued for VPS Codex CLI.",
+    picked_up: "Runner picked up the execution.",
+    codex_starting: "Codex CLI is starting.",
+    planning: "Codex is planning the bounded implementation.",
+    editing_files: "Codex is editing files.",
+    running_tests: "Codex is running validation.",
+    pushing_branch: "Codex is pushing the branch.",
+    creating_pr: "Codex is creating or updating the PR.",
+    waiting_review: "Waiting for owner or reviewer decision.",
+    completed: "Execution completed.",
+    failed: "Execution failed and needs investigation.",
+    canceled: "Execution was canceled.",
+    stale: "Execution is stale."
+  }[phase] || "Execution updated.";
+}
+
+function nextHumanActionForPhase(phase) {
+  if (phase === "waiting_review" || phase === "completed") return "merge_review";
+  if (phase === "failed" || phase === "stale") return "investigate";
+  return "wait";
+}
+
+function normalizeIssueNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeProgress(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function normalizeTimestamp(value) {
+  const parsed = value ? Date.parse(value) : NaN;
+  return new Date(Number.isFinite(parsed) ? parsed : Date.now()).toISOString();
+}
+
+function normalizeStringList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => normalizeText(item).slice(0, 240)).filter(Boolean).slice(0, 20);
+}
+
+function mergeNotifications(existing = [], incoming, currentStep) {
+  const next = [...normalizeStringList(existing), ...normalizeStringList(incoming)];
+  const step = normalizeText(currentStep);
+  if (step && next.length === 0) next.push(step);
+  return [...new Set(next)].slice(-20);
+}
+
+function normalizeUrl(value, origin) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  try {
+    const url = new URL(text, origin);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function authorityForNextAction(action) {

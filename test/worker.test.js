@@ -2,6 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/worker.js";
 
+function createMemoryStore() {
+  const map = new Map();
+  return {
+    async get(key) {
+      return map.get(key) ?? null;
+    },
+    async put(key, value) {
+      map.set(key, value);
+    }
+  };
+}
+
 test("health returns service identity", async () => {
   const response = await worker.fetch(new Request("https://example.com/health"), {
     VTDD_V3_MODE: "test"
@@ -116,4 +128,87 @@ test("issues API exposes v3 planning catalog", async () => {
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.equal(body.issues.some((issue) => issue.number === 1), true);
+});
+
+test("event contract API exposes allowed phases and safety boundary", async () => {
+  const response = await worker.fetch(new Request("https://example.com/api/event-contract"), {
+    VTDD_V3_MODE: "test"
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.contract.allowedPhases.includes("editing_files"), true);
+  assert.equal(body.contract.allowedPhases.includes("waiting_review"), true);
+  assert.equal(body.contract.forbiddenEventFields.includes("chainOfThought"), true);
+  assert.equal(body.contract.safeEventFields.includes("touchedFiles"), true);
+});
+
+test("execution event creates a dashboard-visible execution in store", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const response = await worker.fetch(
+    new Request("https://example.com/api/execution-events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        executionId: "remote-codex-v3-issue2",
+        repository: "marushu/vtdd-v3",
+        issueNumber: 2,
+        title: "VPS Codex CLI execution event contract",
+        branch: "codex/issue-2",
+        phase: "editing_files",
+        currentStep: "Adding safe runner event ingestion.",
+        touchedFiles: ["src/worker.js", "test/worker.test.js"],
+        timestamp: "2026-05-19T08:00:00.000Z"
+      })
+    }),
+    env
+  );
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.execution.repository, "marushu/vtdd-v3");
+  assert.equal(body.execution.progress, 45);
+  assert.equal(body.progressUrl, "https://example.com/progress/remote-codex-v3-issue2");
+
+  const progress = await worker.fetch(
+    new Request("https://example.com/progress/remote-codex-v3-issue2"),
+    env
+  );
+  assert.equal(progress.status, 200);
+  const html = await progress.text();
+  assert.equal(html.includes("Adding safe runner event ingestion."), true);
+  assert.equal(html.includes("src/worker.js"), true);
+});
+
+test("execution event rejects unsafe payloads and unsupported phases", async () => {
+  const unsafe = await worker.fetch(
+    new Request("https://example.com/api/execution-events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        executionId: "remote-codex-unsafe",
+        repository: "marushu/vtdd-v3",
+        phase: "editing_files",
+        chainOfThought: "do not store this"
+      })
+    }),
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
+  );
+  assert.equal(unsafe.status, 400);
+  assert.equal((await unsafe.json()).error, "forbidden_event_field");
+
+  const unsupported = await worker.fetch(
+    new Request("https://example.com/api/execution-events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        executionId: "remote-codex-weird",
+        repository: "marushu/vtdd-v3",
+        phase: "streaming_raw_terminal"
+      })
+    }),
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
+  );
+  assert.equal(unsupported.status, 400);
+  assert.equal((await unsupported.json()).error, "unsupported_phase");
 });

@@ -4,3 +4,7 @@ compatibility_date = "2026-05-19"
 
 [vars]
 VTDD_V3_MODE = "local"
+
+[[kv_namespaces]]
+binding = "EXECUTION_STORE"
+id = "ff1b9f1313434b619326d52772bcbb5a"
