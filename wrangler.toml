@@ -1,0 +1,6 @@
+name = "vtdd-v3-orchestrator"
+main = "src/worker.js"
+compatibility_date = "2026-05-19"
+
+[vars]
+VTDD_V3_MODE = "local"
