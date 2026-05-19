@@ -49,6 +49,9 @@ const forbiddenEventFields = [
   "privateKey"
 ];
 
+const allowedDispatchTaskTypes = ["implementation", "investigation", "docs", "tests", "review"];
+const forbiddenDispatchTaskTypes = ["merge", "deploy", "close_issue", "credential", "dns", "delete"];
+
 const sampleExecutions = [
   {
     executionId: "remote-codex-issue426-1f5bdj",
@@ -198,9 +201,26 @@ export default {
     }
 
     if (url.pathname === "/api/dispatch/preview" && request.method === "POST") {
-      const body = await request.json().catch(() => ({}));
+      const body = await readBody(request);
       const preview = buildDispatchPreview({ body, origin: url.origin });
       return json({ ok: true, preview }, 202);
+    }
+
+    if (url.pathname === "/api/dispatch" && request.method === "POST") {
+      const body = await readBody(request);
+      const validation = validateDispatch(body);
+      if (!validation.ok) {
+        return json(validation, 400);
+      }
+      const dispatch = buildDispatchRecord({ body, origin: url.origin });
+      executions.unshift(dispatch.execution);
+      await saveExecutions(env, executions);
+      return json({
+        ok: true,
+        dispatch: dispatch.queue,
+        execution: dispatch.execution,
+        progressUrl: dispatch.progressUrl
+      }, 202);
     }
 
     if (url.pathname === "/api/issues") {
@@ -243,6 +263,18 @@ async function saveExecutions(env, executions) {
   if (!store?.put) return false;
   await store.put(EXECUTION_STORE_KEY, JSON.stringify(executions.map(stripRuntimeOnlyFields)));
   return true;
+}
+
+async function readBody(request) {
+  const contentType = request.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return request.json().catch(() => ({}));
+  }
+  if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
+    const form = await request.formData();
+    return Object.fromEntries([...form.entries()].map(([key, value]) => [key, String(value)]));
+  }
+  return {};
 }
 
 function validateExecutionEvent(event) {
@@ -440,8 +472,25 @@ function renderDispatch({ url }) {
           <label>Repository <input name="repository" value="marushu/vtdd-v3"></label>
           <label>Issue <input name="issueNumber" value="1"></label>
           <label>Branch <input name="branch" value="codex/issue-1"></label>
+          <label>Task type
+            <select name="taskType">
+              <option value="implementation">Implementation</option>
+              <option value="investigation">Investigation</option>
+              <option value="docs">Docs</option>
+              <option value="tests">Tests</option>
+              <option value="review">Review</option>
+            </select>
+          </label>
           <label>Task <input name="task" value="Build orchestrator dashboard MVP"></label>
           <button class="button primary" type="submit">Preview dispatch JSON</button>
+        </form>
+        <form method="post" action="/api/dispatch" class="form-grid dispatch-form">
+          <input type="hidden" name="repository" value="marushu/vtdd-v3">
+          <input type="hidden" name="issueNumber" value="5">
+          <input type="hidden" name="branch" value="codex/issue-5">
+          <input type="hidden" name="taskType" value="implementation">
+          <input type="hidden" name="task" value="Create dashboard dispatch queue record">
+          <button class="button" type="submit">Create queued execution JSON</button>
         </form>
         <p class="muted">Worker origin: ${escapeHtml(url.origin)}</p>
       </section>
@@ -527,12 +576,14 @@ function buildDispatchPreview({ body, origin }) {
   const repository = normalizeText(body.repository) || "marushu/vtdd-v3";
   const issueNumber = Number(body.issueNumber || 0) || null;
   const branch = normalizeText(body.branch) || (issueNumber ? `codex/issue-${issueNumber}` : "codex/dashboard-dispatch");
+  const taskType = normalizeText(body.taskType) || "implementation";
   const executionId = `remote-codex-${repository.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${issueNumber || "adhoc"}`;
   return {
     executionId,
     repository,
     issueNumber,
     branch,
+    taskType,
     task: normalizeText(body.task) || "Build VTDD v3 dashboard work item",
     progressUrl: `${origin}/progress/${encodeURIComponent(executionId)}`,
     queue: {
@@ -541,6 +592,59 @@ function buildDispatchPreview({ body, origin }) {
       writesGitHubQueueComment: false
     },
     authority: "dispatch preview only; execution writes require governed queue integration"
+  };
+}
+
+function validateDispatch(body) {
+  const taskType = normalizeText(body.taskType) || "implementation";
+  if (forbiddenDispatchTaskTypes.includes(taskType)) {
+    return { ok: false, error: "high_risk_dispatch_forbidden", taskType };
+  }
+  if (!allowedDispatchTaskTypes.includes(taskType)) {
+    return { ok: false, error: "unsupported_task_type", allowedTaskTypes: allowedDispatchTaskTypes };
+  }
+  if (!normalizeText(body.repository)) {
+    return { ok: false, error: "repository_required" };
+  }
+  if (!normalizeText(body.task)) {
+    return { ok: false, error: "task_required" };
+  }
+  return { ok: true };
+}
+
+function buildDispatchRecord({ body, origin }) {
+  const preview = buildDispatchPreview({ body, origin });
+  const now = new Date().toISOString();
+  const execution = {
+    executionId: `${preview.executionId}-${Date.now().toString(36)}`,
+    repository: preview.repository,
+    issueNumber: preview.issueNumber,
+    title: preview.task,
+    branch: preview.branch,
+    status: "queued",
+    phase: "queued",
+    progress: 2,
+    currentStep: `Queued ${preview.taskType} task for VPS Codex CLI handoff.`,
+    touchedFiles: [],
+    prUrl: null,
+    blocker: null,
+    lastUpdatedAt: now,
+    nextHumanAction: "wait",
+    returnThreadUrl: null,
+    notifications: ["Dashboard dispatch created a governed queue record."]
+  };
+  const progressUrl = `${origin}/progress/${encodeURIComponent(execution.executionId)}`;
+  return {
+    progressUrl,
+    execution,
+    queue: {
+      executionId: execution.executionId,
+      transport: "vps_runner",
+      status: "queued",
+      taskType: preview.taskType,
+      progressUrl,
+      authority: "No high-risk action executed by dispatch."
+    }
   };
 }
 
@@ -689,7 +793,8 @@ function page({ title, body }) {
     .row-link em { color:#64736c; font-style:normal; font-size:13px; }
     .form-grid { display:grid; gap:12px; }
     label { display:grid; gap:5px; color:#52635b; }
-    input { min-height:38px; border:1px solid #cbd5cc; border-radius:6px; padding:0 10px; font:inherit; }
+    input, select { min-height:38px; border:1px solid #cbd5cc; border-radius:6px; padding:0 10px; font:inherit; background:#fff; }
+    .dispatch-form { margin-top:16px; padding-top:16px; border-top:1px solid #e1e6df; }
   </style>
 </head>
 <body><main>${body}</main></body>

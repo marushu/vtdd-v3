@@ -117,6 +117,7 @@ test("dispatch preview returns progress URL without executing", async () => {
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.equal(body.preview.queue.status, "preview_only");
+  assert.equal(body.preview.taskType, "implementation");
   assert.equal(body.preview.progressUrl, "https://example.com/progress/remote-codex-marushu-vtdd-v3-1");
 });
 
@@ -211,4 +212,54 @@ test("execution event rejects unsafe payloads and unsupported phases", async () 
   );
   assert.equal(unsupported.status, 400);
   assert.equal((await unsupported.json()).error, "unsupported_phase");
+});
+
+test("dashboard dispatch creates a queued execution without high-risk action", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const response = await worker.fetch(
+    new Request("https://example.com/api/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 5,
+        branch: "codex/issue-5",
+        taskType: "implementation",
+        task: "Wire dashboard dispatch to queue record"
+      })
+    }),
+    env
+  );
+  assert.equal(response.status, 202);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.dispatch.status, "queued");
+  assert.equal(body.dispatch.authority, "No high-risk action executed by dispatch.");
+  assert.equal(body.execution.phase, "queued");
+  assert.equal(body.progressUrl.startsWith("https://example.com/progress/remote-codex-marushu-vtdd-v3-5-"), true);
+
+  const progress = await worker.fetch(new Request(body.progressUrl), env);
+  assert.equal(progress.status, 200);
+  const html = await progress.text();
+  assert.equal(html.includes("Wire dashboard dispatch to queue record"), true);
+  assert.equal(html.includes("queued"), true);
+});
+
+test("dashboard dispatch rejects high-risk task types", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/api/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 5,
+        taskType: "deploy",
+        task: "Deploy production"
+      })
+    }),
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
+  );
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "high_risk_dispatch_forbidden");
 });
