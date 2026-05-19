@@ -35,6 +35,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - #11 既存 RAG に開発チャットを保存・検索できるようにする。
 - #12 開発チャットの rollover / continuation。
 - #13 Voice/Text Driven Development のマイク入力。
+- #13 mic mode 中の Screen Wake Lock と voice-first feedback。
 - #14 Butler intent router for dashboard chat。
 - #15 VPS 常駐 runner と token gate。
 - #16 chat / execution の realtime 更新。
@@ -54,6 +55,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - mac Codex は emergency / bootstrap / auxiliary surface に寄せる。
 - chat は ChatGPT thread ではなく VTDD 側の durable work room として扱う。
 - 音声入力は即実行ではなく、確認可能な text intent に変換する。
+- マイクモード中は可能なら Screen Wake Lock で自動ロックを抑止し、解除 / 未対応を owner に見える状態にする。
 - RAG は full transcript ではなく summary / decision / unresolved / evidence を優先する。
 
 ## 安全境界
@@ -62,6 +64,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - production auth policy や secret mutation は GO + passkey なしに実行しない。
 - raw terminal log、secret、token、approval grant、chain-of-thought は RAG / chat に保存しない。
 - runner は execution credentials を持っても、merge / deploy / close を自律実行しない。
+- 運転中利用では voice-first feedback を優先し、画面注視や high-risk action の音声自動実行を前提にしない。
 
 ## 次の推奨順
 
