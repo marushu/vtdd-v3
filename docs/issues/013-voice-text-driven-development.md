@@ -19,7 +19,12 @@ Cloudflare dashboard の chat 画面から、音声入力で開発指示を text
 - Wake Lock が未対応 / 拒否 / visibility change で解除された場合、状態を画面に表示して owner が気づける。
 - iPhone 運転中利用を想定し、画面注視を前提にしない voice-first feedback を持つ。
 - deploy / merge / close / credential / DNS は音声だけで実行しない。
-- GO + passkey が必要な intent は明示 gate に流す。
+- GO + passkey が必要な intent は、音声会話中でも compact approval sheet に流す。
+- compact approval sheet は action kind、repository、Issue / PR、risk、evidence summary、expiresAt を短く表示する。
+- compact approval sheet には「GO + passkey」ボタンと「あとで判断」ボタンを出せる。
+- 「GO + passkey」ボタン押下を WebAuthn / passkey ceremony の user gesture として使える。
+- passkey success 後は短命 approval grant を作り、該当 action だけに scope する。
+- passkey failure / cancel / timeout は安全に decision queue へ戻す。
 
 ## 非ゴール
 
@@ -29,6 +34,7 @@ Cloudflare dashboard の chat 画面から、音声入力で開発指示を text
 - 完全な自然言語 intent router。
 - 画面ロック後の background recording 保証。
 - iOS / browser の OS 制約を超える sleep 制御。
+- passkey 成功後の scope 外 high-risk action 実行。
 
 ## 検証
 
@@ -37,3 +43,6 @@ Cloudflare dashboard の chat 画面から、音声入力で開発指示を text
 - unsupported browser fallback の確認。
 - Wake Lock supported / unsupported の UI state 確認。
 - mic stop / page hidden / navigation で Wake Lock が解放される確認。
+- compact approval sheet が high-risk intent で表示される確認。
+- passkey cancel / timeout が action 実行せず decision queue に戻る test。
+- approval grant が action kind / repository / Issue / PR に scope される test。

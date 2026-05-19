@@ -17,6 +17,8 @@ Product goal は、オーナーが ChatGPT thread history を source of truth �
 - governed approval なしに DNS、credential、permission、repository settings、deploy、destructive resource を変更しない。
 - オーナーの「一任」は bounded delegated session として扱い、scope / expiry / allowed actions / excluded high-risk actions を見える状態にする。
 - 音声 GO は owner intent として受け取ってよいが、high-risk action は real passkey または既存の短命 approval grant がなければ実行しない。
+- 音声会話中の high-risk action は compact approval sheet を表示し、「GO + passkey」ボタン押下を WebAuthn / passkey ceremony の user gesture として使ってよい。
+- passkey cancel / timeout / scope mismatch は action を実行せず、decision queue に戻す。
 - 運転中や hands-free 利用では、high-risk action の実行ではなく decision queue / 後続確認へ送る。
 - dashboard に chain-of-thought、full terminal logs、secrets、tokens、approval grant values、raw sensitive material を出さない。
 
