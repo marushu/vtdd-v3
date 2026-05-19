@@ -17,6 +17,7 @@ Custom GPT Action Schema に閉じず、Cloudflare dashboard 上の Butler が�
 - intent resolution は chat に記録される。
 - 初期 MVP では `/butler` から owner message を受け取り、低リスク intent を runner queue と開発 chat に接続する。
 - Butler dispatch は progress URL / chat URL / dashboard URL を即返す。
+- Butler persona / owner 呼称は #23 の profile / onboarding 設定に従う。
 - owner が iPhone から intent を確認できる。
 
 ## 非ゴール
