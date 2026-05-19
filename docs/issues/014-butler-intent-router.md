@@ -15,6 +15,8 @@ Custom GPT Action Schema に閉じず、Cloudflare dashboard 上の Butler が�
 - high-risk intent は実行せず decision queue / passkey gate に送る。
 - low-risk intent は dispatch preview / queue record 作成へ進められる。
 - intent resolution は chat に記録される。
+- 初期 MVP では `/butler` から owner message を受け取り、低リスク intent を runner queue と開発 chat に接続する。
+- Butler dispatch は progress URL / chat URL / dashboard URL を即返す。
 - owner が iPhone から intent を確認できる。
 
 ## 非ゴール
@@ -28,3 +30,4 @@ Custom GPT Action Schema に閉じず、Cloudflare dashboard 上の Butler が�
 - intent classification の deterministic test。
 - high-risk intent が実行されず gate に入る test。
 - low-risk implement intent が dispatch preview に変換される test。
+- `/api/butler/dispatch` が queue record と chat record を同時に作る test。
