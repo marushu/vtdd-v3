@@ -39,6 +39,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - #13 音声会話中の compact GO + passkey approval sheet。
 - #14 Butler intent router for dashboard chat。
 - #15 VPS 常駐 runner と token gate。
+- #15 runner auth mode / cost guard。
 - #16 chat / execution の realtime 更新。
 - #17 同一 repository 並行開発の conflict-aware scheduler。
 
@@ -53,7 +54,8 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 
 - dashboard が実質的な Butler home になる。
 - Custom GPT は primary surface ではなく、必要なら optional entrance として残す。
-- VPS Codex CLI が通常の実行面になる。
+- VPS / local runner が通常の実行面になる。
+- 追加 OpenAI API 課金や Codex backend dependency は default にしない。
 - mac Codex は emergency / bootstrap / auxiliary surface に寄せる。
 - chat は ChatGPT thread ではなく VTDD 側の durable work room として扱う。
 - 音声入力は即実行ではなく、確認可能な text intent に変換する。
@@ -69,6 +71,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - runner は execution credentials を持っても、merge / deploy / close を自律実行しない。
 - 運転中利用では voice-first feedback を優先し、画面注視や high-risk action の音声自動実行を前提にしない。
 - 同一 repository の並行開発は conflict-aware scheduler を通し、危ない場合は queue / dry-run / human decision に回す。
+- `OPENAI_API_KEY` / API key billing mode は明示承認、budget cap、dashboard cost risk 表示なしに使わない。
 
 ## 次の推奨順
 

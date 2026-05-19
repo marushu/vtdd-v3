@@ -7,7 +7,7 @@ VTDD v3 は ChatGPT thread を operational home として扱わない。durable 
 ## Roles
 
 - Cloudflare Worker: dashboard、API route、policy gate、operator page。
-- VPS Codex CLI: LLM brain と implementation runner。
+- VPS / local runner: shell、GitHub 操作、tests、PR 作成、dashboard event 送信を行う execution runner。
 - GitHub: durable Issues、PRs、checks、branches、comments、queue records。
 - Passkey operator: high-risk approval boundary。
 - Custom GPT: optional conversational surface と migration compatibility。
@@ -29,6 +29,8 @@ Execution record:
 - `lastUpdatedAt`
 - `nextHumanAction`
 - `returnThreadUrl`
+- `runnerAuthMode`
+- `costMode`
 
 ## Owner-Facing Pages
 
@@ -68,5 +70,13 @@ read-only dashboard operation は GO 不要。
 - VPS runner queue と execution ID
 - generated PR body discipline
 - runtime truth over memory
+
+## Cost Boundary
+
+VTDD v3 は追加 OpenAI API 課金や Codex backend dependency を default にしない。
+
+Runner の default は `local_tool_only` または owner が明示的に使っている ChatGPT / Codex plan 枠であり、API key billing mode ではない。
+
+`OPENAI_API_KEY` / API key billing mode を使う場合は、GO + passkey、budget cap、dashboard 上の cost risk 表示を必要とする。
 
 Custom GPT Action Schema を primary product surface として継承しない。

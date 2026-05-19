@@ -102,6 +102,11 @@ export function normalizeConfig(config = {}) {
     runnerId: config.runnerId || process.env.VTDD_RUNNER_ID || defaultRunnerId,
     token: config.token || process.env.VTDD_RUNNER_TOKEN || "",
     execute: Boolean(config.execute ?? process.env.VTDD_RUNNER_EXECUTE === "1"),
+    runnerAuthMode: config.runnerAuthMode || process.env.VTDD_RUNNER_AUTH_MODE || detectRunnerAuthMode(process.env),
+    costMode: config.costMode || process.env.VTDD_RUNNER_COST_MODE || detectCostMode(process.env),
+    allowOpenAiApiKeyBilling: Boolean(
+      config.allowOpenAiApiKeyBilling ?? process.env.VTDD_ALLOW_OPENAI_API_KEY_BILLING === "1"
+    ),
     codexCommand: config.codexCommand || process.env.VTDD_CODEX_COMMAND || "codex",
     workspaceRoot: config.workspaceRoot || process.env.VTDD_WORKSPACE_ROOT || process.cwd(),
     fetchImpl: config.fetchImpl || fetch,
@@ -179,6 +184,7 @@ function baseEvent(execution) {
 }
 
 async function runCodex(options, execution) {
+  assertCostGuard(options);
   const repoName = execution.repository.split("/").pop();
   const cwd = repoName ? join(options.workspaceRoot, repoName) : options.workspaceRoot;
   const prompt = buildCodexPrompt(execution);
@@ -196,6 +202,26 @@ async function runCodex(options, execution) {
 
 function stripTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function detectRunnerAuthMode(env) {
+  if (env.VTDD_RUNNER_AUTH_MODE) return env.VTDD_RUNNER_AUTH_MODE;
+  if (env.OPENAI_API_KEY) return "api_key";
+  return "local_tool_only";
+}
+
+function detectCostMode(env) {
+  if (env.VTDD_RUNNER_COST_MODE) return env.VTDD_RUNNER_COST_MODE;
+  if (env.OPENAI_API_KEY) return "api_key_billing";
+  return "no_openai_api_billing";
+}
+
+function assertCostGuard(options) {
+  if (options.runnerAuthMode !== "api_key" && options.costMode !== "api_key_billing") return;
+  if (options.allowOpenAiApiKeyBilling) return;
+  throw new Error(
+    "OpenAI API key billing mode is blocked by default. Set VTDD_ALLOW_OPENAI_API_KEY_BILLING=1 only with GO + passkey and a budget cap."
+  );
 }
 
 async function main() {

@@ -11,8 +11,10 @@ Product goal は、オーナーが ChatGPT thread history を source of truth �
 - GitHub runtime truth は memory より強い。
 - ChatGPT thread は optional な conversation surface であり、execution truth ではない。
 - Cloudflare dashboard が owner-facing home。
-- VPS Codex CLI が execution runner。
+- VPS / local runner が execution runner。Codex CLI を使う場合でも、追加 OpenAI API 課金や Codex backend 依存を前提にしない。
 - GitHub Issues / PRs / checks / comments が durable work record。
+- `OPENAI_API_KEY` / API-key billing mode は default 禁止。明示承認なしに runner へ渡さない。
+- runner auth mode は dashboard に `browser_chatgpt`, `chatgpt_codex_cli`, `api_key`, `local_tool_only`, `unknown` として表示できるようにする。
 - 高リスク操作には明示的な GO + real passkey が必要。
 - governed approval なしに DNS、credential、permission、repository settings、deploy、destructive resource を変更しない。
 - オーナーの「一任」は bounded delegated session として扱い、scope / expiry / allowed actions / excluded high-risk actions を見える状態にする。
@@ -51,7 +53,7 @@ v3 feature は以下を満たしたときだけ complete と扱う。
 
 Issue: #17
 
-VPS Codex CLI は複数 execution を扱える前提で設計する。ただし同一 repository の並行開発は Butler / dashboard scheduler が conflict risk を判定してから runner に渡す。
+VPS / local runner は複数 execution を扱える前提で設計する。ただし同一 repository の並行開発は Butler / dashboard scheduler が conflict risk を判定してから runner に渡す。
 
 新しい開発 intent が来たら、まず以下に分類する。
 

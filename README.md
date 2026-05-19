@@ -8,7 +8,7 @@ VTDD v3 は、主作業面を ChatGPT thread history から離し、GitHub truth
 
 - dashboard-first の AI 開発運用。
 - 複数 repository / 複数 execution の可視化。
-- VPS Codex CLI を product runner にする。
+- VPS / local runner を product runner にする。
 - GitHub Issues、PRs、checks、comments を durable truth にする。
 - 高リスク操作は passkey gate の後ろに置く。
 - Custom GPT は optional な conversational entrance であり、source of truth ではない。
@@ -49,3 +49,9 @@ API field、phase value、status value、code symbol は runner 契約のため�
 ## Safety
 
 Merge、deploy、DNS、credential、permission、destructive action は明示的な GO + passkey approval の後ろに残す。
+
+## Cost Boundary
+
+VTDD v3 は追加 OpenAI API 課金や Codex backend dependency を default にしない。
+
+`OPENAI_API_KEY` / API key billing mode は明示承認、budget cap、dashboard 上の cost risk 表示なしに使わない。
