@@ -84,6 +84,77 @@ const notificationEventTypes = [
   { key: "execution_failed", label: "Execution failed" }
 ];
 
+const v2ParityRequiredChecks = [
+  {
+    key: "orchestratorGithubApp",
+    label: "Orchestrator GitHub App",
+    setupKind: "github_app_install",
+    authority: "GitHub owner 承認"
+  },
+  {
+    key: "runnerGithubApp",
+    label: "Runner GitHub App",
+    setupKind: "github_app_install",
+    authority: "GitHub owner 承認"
+  },
+  {
+    key: "reviewerGithubApp",
+    label: "Reviewer GitHub App",
+    setupKind: "github_app_install",
+    authority: "GitHub owner 承認"
+  },
+  {
+    key: "repositoryRead",
+    label: "Repository read",
+    setupKind: "github_app_install",
+    authority: "GitHub owner 承認"
+  },
+  {
+    key: "prWrite",
+    label: "PR write / comment",
+    setupKind: "github_app_install",
+    authority: "GitHub owner 承認"
+  },
+  {
+    key: "workflowDispatch",
+    label: "Actions workflow dispatch",
+    setupKind: "github_app_install",
+    authority: "GitHub owner 承認"
+  },
+  {
+    key: "actionsSecrets",
+    label: "GitHub Actions secrets",
+    setupKind: "github_actions_secrets",
+    authority: "GO + passkey"
+  },
+  {
+    key: "cloudflareSecrets",
+    label: "Cloudflare Worker secrets",
+    setupKind: "cloudflare_secrets",
+    authority: "GO + passkey"
+  },
+  {
+    key: "vpsRunner",
+    label: "VPS runner queue",
+    setupKind: "runner_setup",
+    authority: "GO + passkey"
+  },
+  {
+    key: "geminiReviewer",
+    label: "Gemini reviewer loop",
+    setupKind: "reviewer_setup",
+    authority: "GitHub owner 承認 / reviewer secret"
+  },
+  {
+    key: "codexFallbackReviewer",
+    label: "Codex fallback reviewer",
+    setupKind: "reviewer_setup",
+    authority: "GitHub owner 承認 / reviewer secret"
+  }
+];
+
+const parityReadyStatuses = ["ok", "ready", "observed"];
+
 const sampleExecutions = [
   {
     executionId: "remote-codex-issue426-1f5bdj",
@@ -316,7 +387,9 @@ export default {
       return json({
         ok: true,
         repository: result.repository,
-        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+        repositories: buildRepositoryRegistry({ repositories, executions, chats }),
+        setupRequired: result.repository?.v2Parity?.butlerComplete === false,
+        setupActions: result.repository?.v2Parity?.setupActions || []
       }, 201);
     }
 
@@ -331,7 +404,9 @@ export default {
       return json({
         ok: true,
         repository: result.repository,
-        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+        repositories: buildRepositoryRegistry({ repositories, executions, chats }),
+        setupRequired: result.repository?.v2Parity?.butlerComplete === false,
+        setupActions: result.repository?.v2Parity?.setupActions || []
       });
     }
 
@@ -2665,22 +2740,25 @@ function addRepositoryRecord({ repositories, body, executions, chats }) {
     repository,
     nickname,
     aliases,
-    readiness: repository ? "unverified" : "unresolved",
+    readiness: repository ? "setup_required" : "unresolved",
     repoRead: "未確認",
-    githubApp: "未確認",
-    runnerClone: "未確認",
-    notes: normalizeText(body.notes)
+    githubApp: repository ? "不足" : "未確認",
+    runnerClone: repository ? "不足" : "未確認",
+    notes: normalizeText(body.notes) || (repository ? "v2 parity bootstrap 未完了。GitHub App / runner / reviewer readiness を確認してください。" : ""),
+    v2Parity: repository ? buildRepositoryV2Parity({ repository }) : null
   });
   const existing = repositories.find((item) => normalizeRepositoryRecord(item).id === record.id);
   if (existing) {
+    const current = normalizeRepositoryRecord(existing);
     Object.assign(existing, {
-      ...normalizeRepositoryRecord(existing),
+      ...current,
       ...record,
-      readiness: normalizeRepositoryRecord(existing).readiness === "ready" ? "ready" : record.readiness,
-      aliases: mergeAliases(normalizeRepositoryRecord(existing), record),
-      repoRead: normalizeRepositoryRecord(existing).repoRead,
-      githubApp: normalizeRepositoryRecord(existing).githubApp,
-      runnerClone: normalizeRepositoryRecord(existing).runnerClone
+      readiness: current.v2Parity?.butlerComplete ? "ready" : record.readiness,
+      aliases: mergeAliases(current, record),
+      repoRead: current.repoRead,
+      githubApp: current.githubApp,
+      runnerClone: current.runnerClone,
+      v2Parity: current.v2Parity?.butlerComplete ? current.v2Parity : record.v2Parity
     });
   } else {
     if (record.repository) {
@@ -2867,15 +2945,19 @@ async function checkRepositoryReadiness({ env, repositories, repositoryId, execu
   }
 
   const probe = await probeGithubRepository({ env, repository: record.repository });
+  const v2Parity = buildRepositoryV2Parity({ repository: record.repository, probe, previous: record.v2Parity });
+  const githubAppOk = parityCheckStatus(v2Parity, "orchestratorGithubApp") === "ok";
+  const runnerOk = parityCheckStatus(v2Parity, "vpsRunner") === "ok";
   const updated = normalizeRepositoryRecord({
     ...record,
-    readiness: probe.ok ? "observed" : "unverified",
+    readiness: probe.ok && v2Parity.butlerComplete ? "ready" : probe.ok ? "setup_required" : "unverified",
     repoRead: probe.ok ? "OK" : "失敗",
-    githubApp: record.githubApp,
-    runnerClone: record.runnerClone,
+    githubApp: githubAppOk ? "OK" : "不足",
+    runnerClone: runnerOk ? "OK" : "不足",
     notes: probe.ok
-      ? `${probe.visibility || "unknown"} repository。default branch: ${probe.defaultBranch || "unknown"}`
-      : probe.reason
+      ? `${probe.visibility || "unknown"} repository。default branch: ${probe.defaultBranch || "unknown"}。${v2Parity.summary}`
+      : probe.reason,
+    v2Parity
   });
   repositories[recordIndex] = updated;
   const registry = buildRepositoryRegistry({ repositories, executions, chats });
@@ -2924,6 +3006,93 @@ function normalizeGithubRepositoryProbe(value = {}) {
   };
 }
 
+function buildRepositoryV2Parity({ repository, probe = null, previous = null } = {}) {
+  const repo = normalizeRepositoryInput(repository);
+  if (!repo) {
+    return {
+      status: "unresolved",
+      butlerComplete: false,
+      summary: "owner/repo 未解決のため v2 parity は確認できません。",
+      missingCount: v2ParityRequiredChecks.length,
+      checks: v2ParityRequiredChecks.map((check) => parityCheck({ ...check, status: "unknown" })),
+      setupActions: []
+    };
+  }
+
+  const previousChecks = new Map((previous?.checks || []).map((check) => [check.key, normalizeParityStatus(check.status)]));
+  const checks = v2ParityRequiredChecks.map((check) => {
+    const previousStatus = previousChecks.get(check.key);
+    let status = previousStatus || "missing";
+    if (check.key === "repositoryRead" && probe?.ok) {
+      status = "ok";
+    }
+    return parityCheck({ ...check, status });
+  });
+  const missingChecks = checks.filter((check) => !parityReadyStatuses.includes(check.status));
+  const setupActions = buildRepositorySetupActions({ repository: repo, checks: missingChecks });
+  return {
+    status: missingChecks.length ? "setup_required" : "ready",
+    butlerComplete: missingChecks.length === 0,
+    summary: missingChecks.length
+      ? `v2 parity 未完了: ${missingChecks.length} 件の GitHub App / runner / reviewer / secret readiness が不足。`
+      : "v2 parity ready。GitHub App / runner / reviewer readiness は揃っています。",
+    missingCount: missingChecks.length,
+    checks,
+    setupActions
+  };
+}
+
+function parityCheck(input) {
+  return {
+    key: input.key,
+    label: input.label,
+    status: normalizeParityStatus(input.status),
+    setupKind: input.setupKind,
+    authority: input.authority
+  };
+}
+
+function parityCheckStatus(v2Parity, key) {
+  return normalizeParityStatus((v2Parity?.checks || []).find((check) => check.key === key)?.status);
+}
+
+function normalizeParityStatus(value) {
+  const status = normalizeText(value).toLowerCase();
+  if (["ok", "ready", "observed"].includes(status)) return "ok";
+  if (["manual_required", "manual", "requires_manual"].includes(status)) return "manual_required";
+  if (["missing", "required", "setup_required", "blocked"].includes(status)) return "missing";
+  return "unknown";
+}
+
+function buildRepositorySetupActions({ repository, checks }) {
+  const kinds = [...new Set(checks.map((check) => check.setupKind))];
+  return kinds.map((kind) => repositorySetupAction({ repository, kind, checks: checks.filter((check) => check.setupKind === kind) }));
+}
+
+function repositorySetupAction({ repository, kind, checks }) {
+  const label = {
+    github_app_install: "GitHub App installation を確認",
+    github_actions_secrets: "GitHub Actions secrets を確認",
+    cloudflare_secrets: "Cloudflare Worker secrets を確認",
+    runner_setup: "VPS runner setup を確認",
+    reviewer_setup: "Reviewer setup を確認"
+  }[kind] || "setup を確認";
+  const url = {
+    github_app_install: `https://github.com/${repository}/settings/installations`,
+    github_actions_secrets: `https://github.com/${repository}/settings/secrets/actions`,
+    cloudflare_secrets: "/deploys",
+    runner_setup: "/api/runner/queue",
+    reviewer_setup: `https://github.com/${repository}/actions`
+  }[kind] || `https://github.com/${repository}/settings`;
+  return {
+    kind,
+    label,
+    url,
+    authority: checks.some((check) => check.authority.includes("GO + passkey")) ? "GO + passkey" : "GitHub owner 承認",
+    requiredChecks: checks.map((check) => check.key)
+  };
+}
+
 function parseJsonEnv(value) {
   if (!value) return null;
   try {
@@ -2947,17 +3116,57 @@ function normalizeRepositoryRecord(record = {}) {
   const repository = normalizeRepositoryInput(record.repository || "");
   const nickname = normalizeText(record.nickname || record.name || repository);
   const fallbackId = repository || nickname || "unknown";
+  const v2Parity = normalizeRepositoryV2Parity(record.v2Parity, repository);
   return {
     id: normalizeText(record.id) || repositoryRecordId(fallbackId),
     repository: repository || null,
     nickname,
     aliases: normalizeAliasList(record.aliases, nickname),
     pinnedAt: normalizeText(record.pinnedAt) || null,
-    readiness: normalizeText(record.readiness) || (repository ? "unverified" : "unresolved"),
+    readiness: repository && v2Parity && !v2Parity.butlerComplete
+      ? "setup_required"
+      : normalizeText(record.readiness) || (repository ? v2Parity.status : "unresolved"),
     repoRead: normalizeText(record.repoRead) || "未確認",
     githubApp: normalizeText(record.githubApp) || "未確認",
     runnerClone: normalizeText(record.runnerClone) || "未確認",
-    notes: normalizeText(record.notes)
+    notes: normalizeText(record.notes),
+    v2Parity
+  };
+}
+
+function normalizeRepositoryV2Parity(value, repository) {
+  const repo = normalizeRepositoryInput(repository);
+  if (!repo) return null;
+  if (!value || !Array.isArray(value.checks)) {
+    return buildRepositoryV2Parity({ repository: repo });
+  }
+  const checksByKey = new Map(value.checks.map((check) => [check.key, check]));
+  const checks = v2ParityRequiredChecks.map((required) => parityCheck({
+    ...required,
+    status: checksByKey.get(required.key)?.status || "missing"
+  }));
+  const missingChecks = checks.filter((check) => !parityReadyStatuses.includes(check.status));
+  return {
+    status: missingChecks.length ? "setup_required" : "ready",
+    butlerComplete: missingChecks.length === 0,
+    summary: normalizeText(value.summary) || (missingChecks.length
+      ? `v2 parity 未完了: ${missingChecks.length} 件の readiness が不足。`
+      : "v2 parity ready。"),
+    missingCount: missingChecks.length,
+    checks,
+    setupActions: Array.isArray(value.setupActions) && value.setupActions.length
+      ? value.setupActions.map(normalizeSetupAction)
+      : buildRepositorySetupActions({ repository: repo, checks: missingChecks })
+  };
+}
+
+function normalizeSetupAction(value = {}) {
+  return {
+    kind: normalizeText(value.kind),
+    label: normalizeText(value.label),
+    url: normalizeText(value.url),
+    authority: normalizeText(value.authority),
+    requiredChecks: Array.isArray(value.requiredChecks) ? value.requiredChecks.map(normalizeText).filter(Boolean) : []
   };
 }
 

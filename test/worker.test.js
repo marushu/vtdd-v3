@@ -444,8 +444,12 @@ test("repository registry API stores nickname-only and owner repo targets", asyn
   const sunabaBody = await sunaba.json();
   assert.equal(sunabaBody.repository.nickname, "SunabaEye");
   assert.equal(sunabaBody.repository.repository, "marushu/sunaba-eye");
-  assert.equal(sunabaBody.repository.readiness, "unverified");
+  assert.equal(sunabaBody.repository.readiness, "setup_required");
   assert.equal(sunabaBody.repository.repositoryUrl, "https://github.com/marushu/sunaba-eye");
+  assert.equal(sunabaBody.setupRequired, true);
+  assert.equal(sunabaBody.repository.v2Parity.butlerComplete, false);
+  assert.equal(sunabaBody.repository.v2Parity.checks.some((check) => check.key === "orchestratorGithubApp" && check.status === "missing"), true);
+  assert.equal(sunabaBody.setupActions.some((action) => action.url === "https://github.com/marushu/sunaba-eye/settings/installations"), true);
 
   const renamed = await worker.fetch(
     new Request("https://example.com/api/repositories", {
@@ -654,10 +658,13 @@ test("repository readiness check marks readable repository as observed", async (
   );
   assert.equal(checked.status, 200);
   const body = await checked.json();
-  assert.equal(body.repository.readiness, "observed");
+  assert.equal(body.repository.readiness, "setup_required");
   assert.equal(body.repository.repoRead, "OK");
-  assert.equal(body.repository.githubApp, "未確認");
-  assert.equal(body.repository.notes, "private repository。default branch: main");
+  assert.equal(body.repository.githubApp, "不足");
+  assert.equal(body.repository.v2Parity.butlerComplete, false);
+  assert.equal(body.repository.v2Parity.checks.find((check) => check.key === "repositoryRead").status, "ok");
+  assert.equal(body.repository.v2Parity.setupActions.some((action) => action.kind === "github_app_install"), true);
+  assert.match(body.repository.notes, /v2 parity 未完了/);
 });
 
 test("repository chat pages are served by the React dashboard shell", async () => {

@@ -725,6 +725,49 @@ dl.compact dd {
   padding: 10px;
 }
 
+.parityGate {
+  border: 1px solid #d8e1db;
+  border-radius: 8px;
+  margin: 14px 0;
+  padding: 12px;
+}
+
+.parityGate.blocked {
+  background: #fff8f1;
+  border-color: #e7c7a2;
+}
+
+.parityGate.ready {
+  background: #f3faf6;
+  border-color: #b7d8c7;
+}
+
+.parityHead,
+.parityList li {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.parityHead span,
+.parityList em {
+  color: #8a3f24;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.parityList {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+}
+
+.parityList li {
+  border-top: 1px solid #ead7c2;
+  padding: 7px 0;
+}
+
 code {
   color: #64736c;
   font-size: 12px;
