@@ -263,6 +263,200 @@ p {
   padding: 0 14px;
 }
 
+.butlerChat {
+  min-height: 520px;
+  display: grid;
+  grid-template-rows: minmax(260px, 1fr) auto;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, 0)),
+    #080a09;
+  color: #f5f7f4;
+  box-shadow: 0 12px 34px rgba(21, 35, 28, .16);
+}
+
+.chatTranscript {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: flex-end;
+  min-height: 260px;
+  overflow: auto;
+  padding: 8px 2px 4px;
+}
+
+.chatBubble {
+  max-width: min(78%, 680px);
+  border-radius: 22px;
+  padding: 12px 15px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.chatBubble p {
+  margin: 0;
+  color: inherit;
+}
+
+.chatBubble.owner {
+  align-self: flex-end;
+  background: #f4f5f2;
+  color: #101413;
+  border-bottom-right-radius: 7px;
+}
+
+.chatBubble.butler {
+  align-self: flex-start;
+  max-width: 92%;
+  padding-left: 0;
+  background: transparent;
+  color: #f5f7f4;
+}
+
+.chatBubble.pending {
+  color: #aeb7b1;
+}
+
+.chatComposer {
+  position: relative;
+  display: grid;
+  gap: 8px;
+}
+
+.composerRow {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
+  align-items: end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #2b302d;
+  border-radius: 999px;
+  background: #151816;
+}
+
+.composerRow textarea {
+  width: 100%;
+  min-height: 38px;
+  max-height: 120px;
+  box-sizing: border-box;
+  border: 0;
+  outline: 0;
+  padding: 8px 4px;
+  resize: none;
+  background: transparent;
+  color: #f5f7f4;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.composerRow textarea::placeholder {
+  color: #7f8782;
+}
+
+.iconButton,
+.sendButton {
+  width: 38px;
+  height: 38px;
+  border: 1px solid #303632;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font: inherit;
+}
+
+.iconButton {
+  background: #1f2320;
+  color: #f5f7f4;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.sendButton {
+  border-color: #f5f7f4;
+  background: #f5f7f4;
+  color: #101413;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.micButton::before {
+  content: "";
+  display: block;
+  width: 10px;
+  height: 18px;
+  border-radius: 999px;
+  background: #dfe5e0;
+}
+
+.attachmentMenu {
+  position: absolute;
+  left: 12px;
+  bottom: 62px;
+  z-index: 2;
+  display: grid;
+  min-width: 210px;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #2e3431;
+  border-radius: 22px;
+  background: rgba(24, 27, 25, .96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .28);
+}
+
+.attachmentMenu button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #f5f7f4;
+  text-align: left;
+  font: inherit;
+  padding: 0 12px;
+}
+
+.attachmentMenu button:hover {
+  background: #242a26;
+}
+
+.composerOptions {
+  color: #aeb7b1;
+  font-size: 13px;
+}
+
+.composerOptions summary {
+  cursor: pointer;
+}
+
+.composerOptions label {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.composerOptions input,
+.composerOptions select {
+  min-height: 34px;
+  border: 1px solid #3b433e;
+  border-radius: 6px;
+  background: #101311;
+  color: #f5f7f4;
+  font: inherit;
+  padding: 0 10px;
+}
+
+.composerOptions button {
+  min-height: 36px;
+  margin-top: 8px;
+  border: 1px solid #85b79d;
+  border-radius: 6px;
+  background: #216b52;
+  color: #fff;
+  font: inherit;
+  padding: 0 12px;
+}
+
 .buttonRow {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -770,5 +964,23 @@ code {
 
   h1 {
     font-size: 28px;
+  }
+
+  .butlerChat {
+    min-height: 72vh;
+    margin-right: -10px;
+    margin-left: -10px;
+    border-radius: 0;
+    padding: 14px 12px;
+  }
+
+  .chatBubble {
+    max-width: 86%;
+    font-size: 16px;
+  }
+
+  .composerRow {
+    grid-template-columns: 42px minmax(0, 1fr) 42px 42px;
+    gap: 6px;
   }
 }

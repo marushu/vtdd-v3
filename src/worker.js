@@ -694,6 +694,7 @@ export default {
         chat: result.chat,
         progressUrl: result.progressUrl,
         chatUrl: result.chatUrl,
+        butlerReply: result.butlerReply,
         dashboardUrl: `${url.origin}/orchestrator`
       }, 202);
     }
@@ -3137,10 +3138,11 @@ function buildButlerConversation({ body, origin }) {
     executionId: dispatch.execution.executionId,
     title: normalizeText(body.title) || `Butler conversation: ${intent.task.slice(0, 72)}`,
     status: "active",
-    summary: "Butler / VPS Codex CLI と会話し、Issue 候補・RAG 候補・実装 queue へ進めるための開発チャットです。",
+    summary: "Butler が会話を受け付け、VPS Codex CLI へ整理ターンを渡します。Issue 候補、RAG 候補、実装 queue は会話内で交通整理します。",
     message: intent.message,
     tags: ["butler", "conversation", "vtdd"]
   });
+  const butlerReply = "承知しました。内容を受け付けました。まず会話ターンとして VPS Codex CLI に渡し、実行ではなく整理から始めます。高リスク操作が必要になった場合だけ、GO + passkey の判断に回します。";
   return {
     ok: true,
     intent,
@@ -3157,7 +3159,8 @@ function buildButlerConversation({ body, origin }) {
     },
     progressUrl: dispatch.progressUrl,
     chat,
-    chatUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`
+    chatUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`,
+    butlerReply
   };
 }
 
@@ -3477,7 +3480,7 @@ function resolveButlerIntent(body) {
   if (!message) {
     return { ok: false, error: "message_required", statusCode: 400 };
   }
-  if (containsHighRiskIntent(message)) {
+  if (taskType !== "conversation" && containsHighRiskIntent(message)) {
     return {
       ok: false,
       error: "high_risk_intent_requires_decision_queue",

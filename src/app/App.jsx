@@ -729,13 +729,33 @@ function ConversationStarter({ embedded = false, repository, onChatCreated }) {
   const [issueNumber, setIssueNumber] = useState("");
   const [taskType, setTaskType] = useState("implementation");
   const [status, setStatus] = useState("");
+  const [messages, setMessages] = useState([
+    {
+      role: "butler",
+      text: "ご主人様、執事長の Butler です。まずはここでお話しください。必要に応じて Issue 候補、RAG 候補、開発タスクへ交通整理します。",
+      createdAt: new Date().toISOString()
+    }
+  ]);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
     if (!message.trim()) return;
     const submitAction = event.nativeEvent?.submitter?.value || "conversation";
     const endpoint = submitAction === "dispatch" ? "/api/butler/dispatch" : "/api/butler/converse";
-    setStatus(submitAction === "dispatch" ? "開発 queue に入れています..." : "Butler に会話を渡しています...");
+    const ownerMessage = {
+      role: "owner",
+      text: message.trim(),
+      createdAt: new Date().toISOString()
+    };
+    setMessages((current) => [...current, ownerMessage, {
+      role: "butler",
+      text: submitAction === "dispatch" ? "開発 queue に入れる準備をしています。" : "承知しました。内容を整理しています。",
+      pending: true,
+      createdAt: new Date().toISOString()
+    }]);
+    setStatus(submitAction === "dispatch" ? "開発 queue に入れています..." : "Butler が整理しています...");
+    setMessage("");
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -748,50 +768,89 @@ function ConversationStarter({ embedded = false, repository, onChatCreated }) {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.ok === false) {
-      setStatus(body.authority || body.error || "依頼を作成できませんでした。");
+      const reply = body.authority === "GO + passkey required"
+        ? "これは高リスク操作として検出しました。今は実行せず、判断待ちに回します。会話として続けるか、passkey 承認が必要な操作として扱います。"
+        : body.error || "依頼を作成できませんでした。";
+      setMessages((current) => replacePendingMessage(current, reply));
+      setStatus(reply);
       return;
     }
     onChatCreated(body.chat, body.execution);
-    setMessage("");
     setIssueNumber("");
-    setStatus(submitAction === "dispatch" ? "開発 queue に入れました。" : "会話チャットを作成しました。VPS Codex CLI の返答待ちです。");
+    const reply = body.butlerReply || (submitAction === "dispatch"
+      ? "開発 queue に入れました。進捗とチャットを作成しました。"
+      : "会話チャットを作成しました。VPS Codex CLI の返答待ちです。");
+    setMessages((current) => replacePendingMessage(current, reply));
+    setStatus(reply);
   }
 
   return (
-    <section className={embedded ? "requestPanel embeddedRequest" : "panel requestPanel"}>
-      <div className="sectionTitle">
-        <div>
-          <p className="eyebrow">Butler conversation</p>
-          <h2>Butler と会話</h2>
-        </div>
+    <section className={embedded ? "butlerChat embeddedRequest" : "panel butlerChat"}>
+      <div className="chatTranscript" aria-live="polite">
+        {messages.map((item, index) => (
+          <article className={`chatBubble ${item.role}${item.pending ? " pending" : ""}`} key={`${item.createdAt}-${index}`}>
+            <p>{item.text}</p>
+          </article>
+        ))}
       </div>
-      <form className="verticalForm" onSubmit={submit}>
-        <label>
-          関連 Issue
-          <input inputMode="numeric" value={issueNumber} onChange={(event) => setIssueNumber(event.target.value)} placeholder="会話から作るなら未指定" />
-        </label>
-        <label>
-          開発 queue に入れる場合の種類
-          <select value={taskType} onChange={(event) => setTaskType(event.target.value)}>
-            <option value="implementation">実装</option>
-            <option value="investigation">調査</option>
-            <option value="docs">ドキュメント</option>
-            <option value="tests">テスト</option>
-            <option value="review">レビュー</option>
-          </select>
-        </label>
-        <label>
-          会話
-          <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="考え、違和感、作りたい体験を Butler に話す" />
-        </label>
-        <div className="buttonRow">
-          <button type="submit" value="conversation">会話を始める</button>
-          <button type="submit" value="dispatch">すぐ開発 queue</button>
+
+      <form className="chatComposer" onSubmit={submit}>
+        {attachmentsOpen ? (
+          <div className="attachmentMenu">
+            <button type="button">ファイル</button>
+            <button type="button">カメラ</button>
+            <button type="button">写真</button>
+          </div>
+        ) : null}
+        <div className="composerRow">
+          <button className="iconButton" type="button" aria-label="添付メニュー" onClick={() => setAttachmentsOpen((current) => !current)}>+</button>
+          <textarea
+            aria-label="Butler へのメッセージ"
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            placeholder="Butler にメッセージ"
+            rows={1}
+          />
+          <button className="iconButton micButton" type="button" aria-label="マイク入力"></button>
+          <button className="sendButton" type="submit" value="conversation" aria-label="送信">↑</button>
         </div>
+        <details className="composerOptions">
+          <summary>開発 queue に入れる場合の設定</summary>
+          <label>
+            関連 Issue
+            <input inputMode="numeric" value={issueNumber} onChange={(event) => setIssueNumber(event.target.value)} placeholder="未指定でも可" />
+          </label>
+          <label>
+            種類
+            <select value={taskType} onChange={(event) => setTaskType(event.target.value)}>
+              <option value="implementation">実装</option>
+              <option value="investigation">調査</option>
+              <option value="docs">ドキュメント</option>
+              <option value="tests">テスト</option>
+              <option value="review">レビュー</option>
+            </select>
+          </label>
+          <button type="submit" value="dispatch">すぐ開発 queue</button>
+        </details>
         {status ? <p className="formMessage">{status}</p> : null}
       </form>
     </section>
   );
+}
+
+function replacePendingMessage(messages, text) {
+  const next = [...messages];
+  const index = next.findLastIndex((item) => item.pending);
+  const replacement = {
+    role: "butler",
+    text,
+    createdAt: new Date().toISOString()
+  };
+  if (index >= 0) {
+    next[index] = replacement;
+    return next;
+  }
+  return [...next, replacement];
 }
 
 function ChatDetail({ chat, chatId, execution, onChatChange, onExecutionCreated }) {
