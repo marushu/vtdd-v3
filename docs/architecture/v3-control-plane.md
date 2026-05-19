@@ -49,6 +49,16 @@ Codex Security は optional external reviewer signal として扱う。VTDD runn
 
 Security finding は merge 前 blocker / warning として扱い、raw exploit details や sensitive validation logs は dashboard / RAG に保存しない。
 
+Codex Security が有料 / plan 外 / quota reached の場合は使わず、`plan_limited` / `quota_reached` / `security_not_connected` として表示する。
+
+## Repository Readiness
+
+VTDD v3 は VTDD repository 自体だけでなく、owner の他 repository を開発するための orchestrator である。
+
+Repository は registry / allowlist 上で扱い、Butler は nickname / owner-repo / URL から対象を解決する。未許可 repository は読まず、実行しない。
+
+Repository ごとに `read_ready`, `write_ready`, `runner_ready`, `auth_missing`, `install_missing`, `clone_missing`, `blocked` を表示する。
+
 ## Samidare Backlog
 
 五月雨で出た追加構想は `docs/roadmap/samidare-backlog.md` に固定する。

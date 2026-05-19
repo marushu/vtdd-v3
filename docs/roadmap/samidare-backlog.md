@@ -43,6 +43,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - #16 chat / execution の realtime 更新。
 - #17 同一 repository 並行開発の conflict-aware scheduler。
 - #18 Codex Security reviewer signal。
+- #19 外部 repository onboarding と Butler repository read/develop readiness。
 
 既存 Issue では以下も未完了のまま残る。
 
@@ -58,6 +59,8 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - VPS / local runner が通常の実行面になる。
 - 追加 OpenAI API 課金や Codex backend dependency は default にしない。
 - Codex Security は VTDD 内で再実装せず、GitHub repository に接続された external reviewer signal として取り込む。
+- Codex Security が有料 / plan 外 / quota reached の場合は使わず、reviewer unavailable として表示する。
+- VTDD v3 は VTDD repo 自体だけでなく、owner の他 repository を開発するための orchestrator である。
 - mac Codex は emergency / bootstrap / auxiliary surface に寄せる。
 - chat は ChatGPT thread ではなく VTDD 側の durable work room として扱う。
 - 音声入力は即実行ではなく、確認可能な text intent に変換する。
@@ -74,6 +77,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - 運転中利用では voice-first feedback を優先し、画面注視や high-risk action の音声自動実行を前提にしない。
 - 同一 repository の並行開発は conflict-aware scheduler を通し、危ない場合は queue / dry-run / human decision に回す。
 - `OPENAI_API_KEY` / API key billing mode は明示承認、budget cap、dashboard cost risk 表示なしに使わない。
+- 未許可 repository、GitHub App 未install、runner clone 未準備の repository は実行せず readiness として表示する。
 
 ## 次の推奨順
 
