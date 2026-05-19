@@ -329,6 +329,7 @@ function RepositoryList({ repositories, onRepositoriesChange }) {
                 <div><dt>GitHub App</dt><dd>{repo.githubApp || "未確認"}</dd></div>
                 <div><dt>Runner clone</dt><dd>{repo.runnerClone || "未確認"}</dd></div>
               </dl>
+              <RepositoryParityGate repository={repo} />
               <AliasList editing={editing} onRepositoriesChange={onRepositoriesChange} repository={repo} />
               {repo.notes ? <p>{repo.notes}</p> : null}
               <div className="actions">
@@ -351,6 +352,38 @@ function RepositoryList({ repositories, onRepositoriesChange }) {
         </div>
       </section>
     </>
+  );
+}
+
+function RepositoryParityGate({ repository }) {
+  const parity = repository.v2Parity;
+  if (!repository.repository || !parity) return null;
+  const missingChecks = (parity.checks || []).filter((check) => check.status !== "ok");
+  return (
+    <div className={`parityGate ${parity.butlerComplete ? "ready" : "blocked"}`}>
+      <div className="parityHead">
+        <strong>v2 parity</strong>
+        <span>{parity.butlerComplete ? "完了" : `${missingChecks.length} 件不足`}</span>
+      </div>
+      <p>{parity.summary}</p>
+      {missingChecks.length ? (
+        <ul className="parityList">
+          {missingChecks.slice(0, 5).map((check) => (
+            <li key={check.key}>
+              <span>{check.label}</span>
+              <em>{displayParityStatus(check.status)}</em>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(parity.setupActions || []).length ? (
+        <div className="actions">
+          {parity.setupActions.map((action) => (
+            <a href={action.url} key={action.kind}>{action.label}</a>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1004,9 +1037,19 @@ function displayReadiness(readiness) {
   return {
     ready: "準備済み",
     observed: "検出済み",
+    setup_required: "要セットアップ",
     unverified: "未確認",
     unresolved: "未解決"
   }[readiness] || "未確認";
+}
+
+function displayParityStatus(status) {
+  return {
+    ok: "OK",
+    missing: "不足",
+    unknown: "未確認",
+    manual_required: "手動確認"
+  }[status] || "未確認";
 }
 
 function parseRepositoryChatRoute(path) {
