@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../src/worker.js";
+import worker, { passkeyCredentialValueToBase64Url } from "../src/worker.js";
 
 function createMemoryStore() {
   const map = new Map();
@@ -269,6 +269,12 @@ test("v3 passkey runtime creates registration options and blocks approval before
   );
   assert.equal(approval.status, 409);
   assert.equal((await approval.json()).error, "passkey_not_registered");
+});
+
+test("passkey credential persistence keeps string credential ids", () => {
+  assert.equal(passkeyCredentialValueToBase64Url("credential-id-from-simplewebauthn"), "credential-id-from-simplewebauthn");
+  assert.equal(passkeyCredentialValueToBase64Url(new Uint8Array([1, 2, 3, 254])), "AQID_g");
+  assert.equal(passkeyCredentialValueToBase64Url(""), "");
 });
 
 test("notification settings default to all events and can filter known event types", async () => {
