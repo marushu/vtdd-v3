@@ -63,6 +63,25 @@ test("React dashboard does not auto refresh while owner is typing or using voice
   assert.equal(js.includes("GitHub Actions / VPS runner event"), true);
 });
 
+test("repository main chat renders Butler-style composer affordances", async () => {
+  const response = await worker.fetch(new Request("https://example.com/repositories/vtdd-v3"), {
+    VTDD_V3_MODE: "test"
+  });
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const assetPath = html.match(/src="([^"]+\.js)"/)?.[1];
+  assert.ok(assetPath);
+  const asset = await worker.fetch(new Request(`https://example.com${assetPath}`), {
+    VTDD_V3_MODE: "test"
+  });
+  const js = await asset.text();
+  assert.equal(js.includes("Butler にメッセージ"), true);
+  assert.equal(js.includes("ファイル"), true);
+  assert.equal(js.includes("カメラ"), true);
+  assert.equal(js.includes("写真"), true);
+  assert.equal(js.includes("ご主人様、執事長の Butler です"), true);
+});
+
 test("progress page is addressable by executionId", async () => {
   const response = await worker.fetch(
     new Request("https://example.com/progress/remote-codex-issue426-1f5bdj"),
@@ -1070,6 +1089,27 @@ test("dashboard Butler refuses high-risk natural-language intent", async () => {
   assert.equal(response.status, 400);
   const body = await response.json();
   assert.equal(body.error, "high_risk_intent_requires_decision_queue");
+});
+
+test("dashboard Butler conversation accepts high-risk words without executing them", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const response = await worker.fetch(
+    new Request("https://example.com/api/butler/converse", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 36,
+        message: "この失敗 progress を一覧から消して。まずは会話として整理して。"
+      })
+    }),
+    env
+  );
+  assert.equal(response.status, 202);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.conversation.mode, "conversation");
+  assert.equal(body.butlerReply.includes("実行ではなく整理"), true);
 });
 
 test("dashboard dispatch rejects high-risk task types", async () => {
