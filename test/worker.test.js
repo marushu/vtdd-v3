@@ -32,12 +32,12 @@ test("orchestrator dashboard renders execution cards", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type"), /text\/html/);
   const html = await response.text();
-  assert.equal(html.includes("VTDD v3 Orchestrator"), true);
+  assert.equal(html.includes("VTDD v3 オーケストレーター"), true);
   assert.equal(html.includes("remote-codex-issue426-1f5bdj"), true);
-  assert.equal(html.includes("Open PR"), true);
-  assert.equal(html.includes("Work Inbox"), true);
-  assert.equal(html.includes("Human decisions"), true);
-  assert.equal(html.includes("Notifications"), true);
+  assert.equal(html.includes("PR を開く"), true);
+  assert.equal(html.includes("進行中の開発"), true);
+  assert.equal(html.includes("判断待ち"), true);
+  assert.equal(html.includes("通知"), true);
   assert.equal(html.includes("v3 Issues"), true);
 });
 
@@ -48,8 +48,8 @@ test("progress page is addressable by executionId", async () => {
   );
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.equal(html.includes("Butler first-response latency"), true);
-  assert.equal(html.includes("editing_files"), true);
+  assert.equal(html.includes("Butler 初動応答の高速化"), true);
+  assert.equal(html.includes("ファイル編集中"), true);
 });
 
 test("execution list API returns durable JSON shape", async () => {
@@ -69,7 +69,7 @@ test("decision queue page and API expose human gates", async () => {
   });
   assert.equal(page.status, 200);
   const html = await page.text();
-  assert.equal(html.includes("Decision Queue"), true);
+  assert.equal(html.includes("判断待ちキュー"), true);
   assert.equal(html.includes("GO + real passkey"), true);
 
   const response = await worker.fetch(new Request("https://example.com/api/decisions"), {
@@ -87,8 +87,8 @@ test("notifications page and API expose owner signals", async () => {
   });
   assert.equal(page.status, 200);
   const html = await page.text();
-  assert.equal(html.includes("Notifications"), true);
-  assert.equal(html.includes("PR merged"), true);
+  assert.equal(html.includes("通知"), true);
+  assert.equal(html.includes("PR は merge 済み"), true);
 
   const response = await worker.fetch(new Request("https://example.com/api/notifications"), {
     VTDD_V3_MODE: "test"
@@ -262,4 +262,60 @@ test("dashboard dispatch rejects high-risk task types", async () => {
   assert.equal(response.status, 400);
   const body = await response.json();
   assert.equal(body.error, "high_risk_dispatch_forbidden");
+});
+
+test("runner queue and claim expose queued work to VPS adapter", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const dispatch = await worker.fetch(
+    new Request("https://example.com/api/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repository: "marushu/vtdd-v3",
+        issueNumber: 5,
+        branch: "codex/issue-5",
+        taskType: "implementation",
+        task: "Runner should pick this up"
+      })
+    }),
+    env
+  );
+  const dispatchBody = await dispatch.json();
+
+  const queue = await worker.fetch(new Request("https://example.com/api/runner/queue?limit=1"), env);
+  assert.equal(queue.status, 200);
+  const queueBody = await queue.json();
+  assert.equal(queueBody.ok, true);
+  assert.equal(queueBody.queue[0].executionId, dispatchBody.execution.executionId);
+  assert.equal(queueBody.queue[0].progressUrl.includes("/progress/"), true);
+
+  const claim = await worker.fetch(
+    new Request("https://example.com/api/runner/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        executionId: dispatchBody.execution.executionId,
+        runnerId: "test-vps"
+      })
+    }),
+    env
+  );
+  assert.equal(claim.status, 200);
+  const claimBody = await claim.json();
+  assert.equal(claimBody.ok, true);
+  assert.equal(claimBody.execution.phase, "picked_up");
+  assert.equal(claimBody.execution.status, "running");
+
+  const secondClaim = await worker.fetch(
+    new Request("https://example.com/api/runner/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        executionId: dispatchBody.execution.executionId,
+        runnerId: "other-vps"
+      })
+    }),
+    env
+  );
+  assert.equal(secondClaim.status, 409);
 });

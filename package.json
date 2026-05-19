@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --test",
     "dev": "wrangler dev src/worker.js",
-    "deploy": "wrangler deploy src/worker.js"
+    "deploy": "wrangler deploy src/worker.js",
+    "runner:once": "node scripts/vps-codex-runner.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

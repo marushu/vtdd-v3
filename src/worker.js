@@ -57,18 +57,18 @@ const sampleExecutions = [
     executionId: "remote-codex-issue426-1f5bdj",
     repository: "marushu/vtdd-v2-p",
     issueNumber: 426,
-    title: "Butler first-response latency",
+    title: "Butler 初動応答の高速化",
     branch: "codex/issue-426",
     status: "running",
     phase: "editing_files",
     progress: 42,
-    currentStep: "Updating Custom GPT setup instructions and docs tests.",
+    currentStep: "Custom GPT setup instructions と docs test を更新中。",
     prUrl: null,
     blocker: null,
     lastUpdatedAt: "2026-05-19T05:40:00.000Z",
     nextHumanAction: "wait",
     returnThreadUrl: null,
-    notifications: ["Runner picked up the queue", "Docs tests are expected next"]
+    notifications: ["Runner が queue を取得しました", "次に docs test を実行予定です"]
   },
   {
     executionId: "remote-codex-issue424-closed",
@@ -79,13 +79,13 @@ const sampleExecutions = [
     status: "completed",
     phase: "completed",
     progress: 100,
-    currentStep: "Merged and deployed. Runtime guard is live.",
+    currentStep: "merge / deploy 済み。runtime guard は反映済み。",
     prUrl: "https://github.com/marushu/vtdd-v2-p/pull/425",
     blocker: null,
     lastUpdatedAt: "2026-05-19T04:54:49.000Z",
     nextHumanAction: "issue_close_review",
     returnThreadUrl: null,
-    notifications: ["PR merged", "Cloudflare deploy succeeded", "Issue close is ready"]
+    notifications: ["PR は merge 済み", "Cloudflare deploy 成功", "Issue close 判断待ちです"]
   },
   {
     executionId: "remote-codex-v3-dashboard-mvp",
@@ -96,24 +96,24 @@ const sampleExecutions = [
     status: "running",
     phase: "running_tests",
     progress: 76,
-    currentStep: "Publishing the first dashboard Worker URL.",
+    currentStep: "最初の dashboard Worker URL を公開中。",
     prUrl: "https://github.com/marushu/vtdd-v3",
     blocker: null,
     lastUpdatedAt: "2026-05-19T06:10:00.000Z",
     nextHumanAction: "review_dashboard",
     returnThreadUrl: null,
-    notifications: ["Repository created", "Initial issues created", "Dashboard deploy in progress"]
+    notifications: ["Repository 作成済み", "初期 Issue 作成済み", "Dashboard deploy 進行中"]
   }
 ];
 
 const issueCatalog = [
   { number: 1, title: "Epic: VTDD v3 Cloudflare Orchestrator Dashboard", status: "open" },
-  { number: 2, title: "VPS Codex CLI execution event contract", status: "open" },
-  { number: 3, title: "Human decision queue", status: "open" },
-  { number: 4, title: "Owner notifications", status: "open" },
-  { number: 5, title: "Dashboard dispatch to VPS Codex CLI", status: "open" },
-  { number: 6, title: "Evaluate vtdd.hibou-web.com migration to Cloudflare", status: "open" },
-  { number: 7, title: "GitHub App roles and runner credentials for v3", status: "planned" }
+  { number: 2, title: "VPS Codex CLI 進捗イベント契約", status: "open" },
+  { number: 3, title: "人間の判断キュー", status: "open" },
+  { number: 4, title: "オーナー通知", status: "open" },
+  { number: 5, title: "Dashboard から VPS Codex CLI へ dispatch", status: "open" },
+  { number: 6, title: "vtdd.hibou-web.com の Cloudflare 移行検討", status: "open" },
+  { number: 7, title: "v3 GitHub App 権限と runner credential", status: "planned" }
 ];
 
 export default {
@@ -221,6 +221,33 @@ export default {
         execution: dispatch.execution,
         progressUrl: dispatch.progressUrl
       }, 202);
+    }
+
+    if (url.pathname === "/api/runner/queue" && request.method === "GET") {
+      const limit = Math.max(1, Math.min(10, Number(url.searchParams.get("limit") || 5)));
+      const queue = executions
+        .filter((execution) => execution.status === "queued" && execution.phase === "queued")
+        .slice(0, limit)
+        .map((execution) => ({
+          executionId: execution.executionId,
+          repository: execution.repository,
+          issueNumber: execution.issueNumber,
+          title: execution.title,
+          branch: execution.branch,
+          currentStep: execution.currentStep,
+          progressUrl: `${url.origin}/progress/${encodeURIComponent(execution.executionId)}`
+        }));
+      return json({ ok: true, queue });
+    }
+
+    if (url.pathname === "/api/runner/claim" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = claimExecution({ executions, body, origin: url.origin });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveExecutions(env, executions);
+      return json(result, 200);
     }
 
     if (url.pathname === "/api/issues") {
@@ -368,42 +395,42 @@ function renderDashboard({ executions, env, url }) {
   const decisions = buildDecisionItems(executions).length;
   const notifications = buildNotifications(executions).length;
   return page({
-    title: "VTDD v3 Orchestrator",
+    title: "VTDD v3 オーケストレーター",
     body: `
       <section class="hero">
         <p class="eyebrow">Cloudflare control plane</p>
-        <h1>VTDD v3 Orchestrator</h1>
-        <p>Multi-repo VPS Codex CLI executions, PRs, blockers, and human decisions in one owner-facing dashboard.</p>
+        <h1>VTDD v3 オーケストレーター</h1>
+        <p>複数リポジトリの VPS Codex CLI 実行、PR、blocker、人間の判断待ちをひとつの画面で見るための dashboard です。</p>
         <div class="meta">
-          <span>Mode: ${escapeHtml(env?.VTDD_V3_MODE || "unknown")}</span>
-          <span>${executions.length} executions</span>
-          <span>${decisions} decisions</span>
-          <span>${notifications} notifications</span>
+          <span>モード: ${escapeHtml(env?.VTDD_V3_MODE || "unknown")}</span>
+          <span>${executions.length} 件の実行</span>
+          <span>${decisions} 件の判断待ち</span>
+          <span>${notifications} 件の通知</span>
         </div>
         <div class="actions hero-actions">
-          <a class="button primary" href="/dispatch">Dispatch</a>
-          <a class="button" href="/decisions">Human decisions</a>
-          <a class="button" href="/notifications">Notifications</a>
+          <a class="button primary" href="/dispatch">開発を投げる</a>
+          <a class="button" href="/decisions">判断待ち</a>
+          <a class="button" href="/notifications">通知</a>
           <a class="button" href="/api/executions">JSON</a>
         </div>
       </section>
       <section>
         <div class="section-title">
-          <h2>Work Inbox</h2>
-          <span>Needs you / running / completed</span>
+          <h2>進行中の開発</h2>
+          <span>判断待ち / 実行中 / 完了</span>
         </div>
         <div class="grid">${cards}</div>
       </section>
       <section>
         <div class="section-title">
           <h2>v3 Issues</h2>
-          <span>GitHub-backed planning seeds</span>
+          <span>GitHub を source of truth にした計画</span>
         </div>
         <div class="issue-list">${issueCatalog.map(renderIssueRow).join("")}</div>
       </section>
       <section class="notice">
-        <h2>Domain note</h2>
-        <p><code>vtdd.hibou-web.com</code> still points at Sakura. Use this Worker URL for now: <code>${escapeHtml(url.origin)}</code>.</p>
+        <h2>ドメインメモ</h2>
+        <p><code>vtdd.hibou-web.com</code> はまだ Sakura を向いています。今はこの Worker URL を使います: <code>${escapeHtml(url.origin)}</code></p>
       </section>
     `
   });
@@ -417,7 +444,7 @@ function renderProgress({ execution }) {
         <p class="eyebrow">${escapeHtml(execution.repository)} #${escapeHtml(execution.issueNumber)}</p>
         <h1>${escapeHtml(execution.title)}</h1>
         <p>${escapeHtml(execution.currentStep)}</p>
-        <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/decisions">Decisions</a></div>
+        <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/decisions">判断待ち</a></div>
       </section>
       ${renderExecutionCard(execution, { expanded: true })}
     `
@@ -427,15 +454,15 @@ function renderProgress({ execution }) {
 function renderDecisions({ executions }) {
   const items = buildDecisionItems(executions);
   return page({
-    title: "VTDD human decisions",
+    title: "VTDD 判断待ち",
     body: `
       <section class="hero">
         <p class="eyebrow">Human gate</p>
-        <h1>Decision Queue</h1>
-        <p>Merge, deploy, close, retry, and investigation decisions stay owner-visible and governed.</p>
+        <h1>判断待ちキュー</h1>
+        <p>merge、deploy、Issue close、retry、調査判断をオーナーが見える場所に集めます。</p>
         <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/api/decisions">JSON</a></div>
       </section>
-      <div class="stack">${items.map(renderDecisionItem).join("") || `<p class="muted">No decisions waiting.</p>`}</div>
+      <div class="stack">${items.map(renderDecisionItem).join("") || `<p class="muted">判断待ちはありません。</p>`}</div>
     `
   });
 }
@@ -443,12 +470,12 @@ function renderDecisions({ executions }) {
 function renderNotifications({ executions }) {
   const notifications = buildNotifications(executions);
   return page({
-    title: "VTDD notifications",
+    title: "VTDD 通知",
     body: `
       <section class="hero">
         <p class="eyebrow">Owner signal</p>
-        <h1>Notifications</h1>
-        <p>Unread-style events without needing to hunt through ChatGPT threads.</p>
+        <h1>通知</h1>
+        <p>ChatGPT スレッドを探し回らずに、開発の変化だけを追える通知一覧です。</p>
         <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/api/notifications">JSON</a></div>
       </section>
       <div class="stack">${notifications.map(renderNotification).join("")}</div>
@@ -458,31 +485,31 @@ function renderNotifications({ executions }) {
 
 function renderDispatch({ url }) {
   return page({
-    title: "VTDD dispatch",
+    title: "VTDD 開発 dispatch",
     body: `
       <section class="hero">
         <p class="eyebrow">VPS Codex CLI</p>
-        <h1>Dispatch Preview</h1>
-        <p>This MVP does not execute yet. It prepares the queue shape and progress URL without spending OpenAI API credits from Cloudflare.</p>
+        <h1>開発を投げる</h1>
+        <p>Cloudflare Worker から OpenAI API credit を消費せず、VPS Codex CLI に渡す queue record と progress URL を作ります。</p>
         <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a></div>
       </section>
       <section class="card wide">
-        <h2>Start work</h2>
+        <h2>作業を作成</h2>
         <form method="post" action="/api/dispatch/preview" class="form-grid">
           <label>Repository <input name="repository" value="marushu/vtdd-v3"></label>
           <label>Issue <input name="issueNumber" value="1"></label>
           <label>Branch <input name="branch" value="codex/issue-1"></label>
-          <label>Task type
+          <label>作業種別
             <select name="taskType">
-              <option value="implementation">Implementation</option>
-              <option value="investigation">Investigation</option>
-              <option value="docs">Docs</option>
-              <option value="tests">Tests</option>
-              <option value="review">Review</option>
+              <option value="implementation">実装</option>
+              <option value="investigation">調査</option>
+              <option value="docs">ドキュメント</option>
+              <option value="tests">テスト</option>
+              <option value="review">レビュー</option>
             </select>
           </label>
-          <label>Task <input name="task" value="Build orchestrator dashboard MVP"></label>
-          <button class="button primary" type="submit">Preview dispatch JSON</button>
+          <label>作業内容 <input name="task" value="Build orchestrator dashboard MVP"></label>
+          <button class="button primary" type="submit">dispatch JSON を preview</button>
         </form>
         <form method="post" action="/api/dispatch" class="form-grid dispatch-form">
           <input type="hidden" name="repository" value="marushu/vtdd-v3">
@@ -490,7 +517,7 @@ function renderDispatch({ url }) {
           <input type="hidden" name="branch" value="codex/issue-5">
           <input type="hidden" name="taskType" value="implementation">
           <input type="hidden" name="task" value="Create dashboard dispatch queue record">
-          <button class="button" type="submit">Create queued execution JSON</button>
+          <button class="button" type="submit">queued execution を作成</button>
         </form>
         <p class="muted">Worker origin: ${escapeHtml(url.origin)}</p>
       </section>
@@ -501,8 +528,8 @@ function renderDispatch({ url }) {
 function renderExecutionCard(execution, options = {}) {
   const progress = Math.max(0, Math.min(100, Number(execution.progress || 0)));
   const pr = execution.prUrl
-    ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">Open PR</a>`
-    : `<span class="muted">PR not created yet</span>`;
+    ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">PR を開く</a>`
+    : `<span class="muted">PR はまだありません</span>`;
   const blocker = execution.blocker
     ? `<p class="blocker">Blocker: ${escapeHtml(execution.blocker)}</p>`
     : "";
@@ -514,20 +541,20 @@ function renderExecutionCard(execution, options = {}) {
           <h3>${escapeHtml(execution.repository)} #${escapeHtml(execution.issueNumber)}</h3>
           <p>${escapeHtml(execution.title)}</p>
         </div>
-        <span class="pill ${escapeAttribute(execution.status)}">${escapeHtml(execution.status)}</span>
+        <span class="pill ${escapeAttribute(execution.status)}">${escapeHtml(displayStatus(execution.status))}</span>
       </div>
       <div class="bar"><span style="width:${progress}%"></span></div>
       <dl>
-        <div><dt>Phase</dt><dd>${escapeHtml(execution.phase)}</dd></div>
+        <div><dt>Phase</dt><dd>${escapeHtml(displayPhase(execution.phase))}</dd></div>
         <div><dt>Branch</dt><dd>${escapeHtml(execution.branch)}</dd></div>
-        <div><dt>Updated</dt><dd>${escapeHtml(formatDate(execution.lastUpdatedAt))}</dd></div>
-        <div><dt>Next</dt><dd>${escapeHtml(execution.nextHumanAction)}</dd></div>
+        <div><dt>更新</dt><dd>${escapeHtml(formatDate(execution.lastUpdatedAt))}</dd></div>
+        <div><dt>次</dt><dd>${escapeHtml(displayNextAction(execution.nextHumanAction))}</dd></div>
       </dl>
       <p>${escapeHtml(execution.currentStep)}</p>
       ${(execution.touchedFiles || []).length ? `<p class="muted">Files: ${escapeHtml(execution.touchedFiles.join(", "))}</p>` : ""}
       ${blocker}
       <div class="actions">
-        <a class="button" href="${escapeAttribute(href)}">Progress</a>
+        <a class="button" href="${escapeAttribute(href)}">進捗</a>
         ${pr}
       </div>
       ${options.expanded ? `<pre>${escapeHtml(JSON.stringify(execution, null, 2))}</pre>` : ""}
@@ -540,11 +567,11 @@ function renderIssueRow(issue) {
 }
 
 function renderDecisionItem(item) {
-  return `<article class="card wide"><h3>${escapeHtml(item.label)}</h3><p>${escapeHtml(item.reason)}</p><div class="actions"><a class="button" href="${escapeAttribute(item.progressUrl)}">Progress</a>${item.prUrl ? `<a class="button" href="${escapeAttribute(item.prUrl)}">PR</a>` : ""}</div><p class="muted">Authority: ${escapeHtml(item.authority)}</p></article>`;
+  return `<article class="card wide"><h3>${escapeHtml(item.label)}</h3><p>${escapeHtml(item.reason)}</p><div class="actions"><a class="button" href="${escapeAttribute(item.progressUrl)}">進捗</a>${item.prUrl ? `<a class="button" href="${escapeAttribute(item.prUrl)}">PR</a>` : ""}</div><p class="muted">Authority: ${escapeHtml(item.authority)}</p></article>`;
 }
 
 function renderNotification(item) {
-  return `<article class="card wide"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.message)}</p><p class="muted">${escapeHtml(formatDate(item.createdAt))} / ${escapeHtml(item.executionId)}</p><a class="button" href="${escapeAttribute(item.progressUrl)}">Open progress</a></article>`;
+  return `<article class="card wide"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.message)}</p><p class="muted">${escapeHtml(formatDate(item.createdAt))} / ${escapeHtml(item.executionId)}</p><a class="button" href="${escapeAttribute(item.progressUrl)}">進捗を開く</a></article>`;
 }
 
 function buildDecisionItems(executions) {
@@ -648,6 +675,47 @@ function buildDispatchRecord({ body, origin }) {
   };
 }
 
+function claimExecution({ executions, body, origin }) {
+  const executionId = normalizeText(body.executionId);
+  const runnerId = normalizeText(body.runnerId).slice(0, 80) || "vps-codex-runner";
+  if (!executionId) {
+    return { ok: false, error: "executionId_required", statusCode: 400 };
+  }
+
+  const index = executions.findIndex((execution) => execution.executionId === executionId);
+  if (index < 0) {
+    return { ok: false, error: "execution_not_found", executionId, statusCode: 404 };
+  }
+
+  const execution = executions[index];
+  if (execution.status !== "queued" || execution.phase !== "queued") {
+    return {
+      ok: false,
+      error: "execution_not_claimable",
+      executionId,
+      status: execution.status,
+      phase: execution.phase,
+      statusCode: 409
+    };
+  }
+
+  const claimed = {
+    ...execution,
+    status: "running",
+    phase: "picked_up",
+    progress: 8,
+    currentStep: `Runner ${runnerId} picked up the queued execution.`,
+    lastUpdatedAt: new Date().toISOString(),
+    notifications: mergeNotifications(execution.notifications, [`Runner ${runnerId} claimed execution.`])
+  };
+  executions[index] = claimed;
+  return {
+    ok: true,
+    execution: claimed,
+    progressUrl: `${origin}/progress/${encodeURIComponent(executionId)}`
+  };
+}
+
 function statusForPhase(phase) {
   if (phase === "completed") return "completed";
   if (phase === "failed") return "failed";
@@ -746,6 +814,47 @@ function authorityForNextAction(action) {
     return "GO + real passkey";
   }
   return "GO if execution is requested";
+}
+
+function displayStatus(status) {
+  return {
+    queued: "待機中",
+    running: "実行中",
+    waiting: "判断待ち",
+    completed: "完了",
+    failed: "失敗",
+    canceled: "キャンセル",
+    stale: "停滞"
+  }[status] || status;
+}
+
+function displayPhase(phase) {
+  return {
+    queued: "queue 待機",
+    picked_up: "runner 取得済み",
+    codex_starting: "Codex 起動中",
+    planning: "計画中",
+    editing_files: "ファイル編集中",
+    running_tests: "テスト実行中",
+    pushing_branch: "branch push 中",
+    creating_pr: "PR 作成中",
+    waiting_review: "レビュー待ち",
+    completed: "完了",
+    failed: "失敗",
+    canceled: "キャンセル",
+    stale: "停滞"
+  }[phase] || phase;
+}
+
+function displayNextAction(action) {
+  return {
+    wait: "待つ",
+    issue_close_review: "Issue close 判断",
+    merge_review: "merge 判断",
+    deploy_review: "deploy 判断",
+    investigate: "調査",
+    review_dashboard: "dashboard 確認"
+  }[action] || action;
 }
 
 function page({ title, body }) {
