@@ -164,7 +164,8 @@ const issueCatalog = [
   { number: 13, title: "Voice/Text Driven Development のマイク入力", status: "planned" },
   { number: 14, title: "Butler intent router for dashboard chat", status: "planned" },
   { number: 15, title: "VPS 常駐 runner と token gate", status: "planned" },
-  { number: 16, title: "chat / execution の realtime 更新", status: "planned" }
+  { number: 16, title: "chat / execution の realtime 更新", status: "planned" },
+  { number: 17, title: "同一 repository 並行開発の conflict-aware scheduler", status: "planned" }
 ];
 
 export default {

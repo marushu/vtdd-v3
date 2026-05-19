@@ -15,6 +15,9 @@ Product goal は、オーナーが ChatGPT thread history を source of truth �
 - GitHub Issues / PRs / checks / comments が durable work record。
 - 高リスク操作には明示的な GO + real passkey が必要。
 - governed approval なしに DNS、credential、permission、repository settings、deploy、destructive resource を変更しない。
+- オーナーの「一任」は bounded delegated session として扱い、scope / expiry / allowed actions / excluded high-risk actions を見える状態にする。
+- 音声 GO は owner intent として受け取ってよいが、high-risk action は real passkey または既存の短命 approval grant がなければ実行しない。
+- 運転中や hands-free 利用では、high-risk action の実行ではなく decision queue / 後続確認へ送る。
 - dashboard に chain-of-thought、full terminal logs、secrets、tokens、approval grant values、raw sensitive material を出さない。
 
 ## 日本語運用ルール
@@ -41,3 +44,20 @@ v3 feature は以下を満たしたときだけ complete と扱う。
 - React などの rich frontend は route / API contract が安定してから追加する。
 - long-running execution は必ず `executionId` で addressable にする。
 - execution card は status、phase、branch、PR URL、blocker、last update、next human action を表示する。
+
+## Parallel Execution Boundary
+
+Issue: #17
+
+VPS Codex CLI は複数 execution を扱える前提で設計する。ただし同一 repository の並行開発は Butler / dashboard scheduler が conflict risk を判定してから runner に渡す。
+
+新しい開発 intent が来たら、まず以下に分類する。
+
+- `parallel_safe`: repository は同じでも Issue / branch / write set が分離できるため並行 dispatch 可能。
+- `queue_required`: 同一 branch、同一 Issue、同一 touched file、または open PR overlap があり、順番待ちが必要。
+- `dry_run_required`: write set が不明なため、planning-only / dry-run runner で衝突可能性を調べる。
+- `human_decision_required`: scope conflict、authority conflict、または high-risk action が含まれる。
+
+Butler は owner のアイデアを止めない。すぐ execution できない場合でも chat / idea record を保存し、owner-facing 日本語で「キューに入れました」「先に dry-run します」「この2件は同時実行できません」を返す。
+
+同一 repository で複数 execution を走らせる場合は、別 branch / 別 worktree / 明示 write ownership を使う。main 直編集や同一 branch の複数 runner 書き込みは禁止。

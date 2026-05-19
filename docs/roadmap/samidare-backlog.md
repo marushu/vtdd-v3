@@ -39,6 +39,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - #14 Butler intent router for dashboard chat。
 - #15 VPS 常駐 runner と token gate。
 - #16 chat / execution の realtime 更新。
+- #17 同一 repository 並行開発の conflict-aware scheduler。
 
 既存 Issue では以下も未完了のまま残る。
 
@@ -65,6 +66,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - raw terminal log、secret、token、approval grant、chain-of-thought は RAG / chat に保存しない。
 - runner は execution credentials を持っても、merge / deploy / close を自律実行しない。
 - 運転中利用では voice-first feedback を優先し、画面注視や high-risk action の音声自動実行を前提にしない。
+- 同一 repository の並行開発は conflict-aware scheduler を通し、危ない場合は queue / dry-run / human decision に回す。
 
 ## 次の推奨順
 
