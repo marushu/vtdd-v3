@@ -105,6 +105,77 @@ test("notifications page and API expose owner signals", async () => {
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.equal(body.notifications.length > 0, true);
+  assert.equal(body.notifications.some((item) => item.eventType === "human_decision_ready"), true);
+});
+
+test("notification settings default to all events and can filter known event types", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const settingsPage = await worker.fetch(new Request("https://example.com/notifications/settings"), env);
+  assert.equal(settingsPage.status, 200);
+  const html = await settingsPage.text();
+  assert.equal(html.includes("通知設定"), true);
+  assert.equal(html.includes("human_decision_ready"), true);
+
+  const initial = await worker.fetch(new Request("https://example.com/api/notifications/settings"), env);
+  const initialBody = await initial.json();
+  assert.equal(initialBody.settings.mode, "all");
+  assert.equal(initialBody.eventTypes.some((event) => event.key === "runner_event"), true);
+
+  const saved = await worker.fetch(
+    new Request("https://example.com/api/notifications/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "selected",
+        events: ["human_decision_ready"]
+      })
+    }),
+    env
+  );
+  assert.equal(saved.status, 200);
+  const savedBody = await saved.json();
+  assert.deepEqual(savedBody.settings.enabledEvents, ["human_decision_ready"]);
+
+  const filtered = await worker.fetch(new Request("https://example.com/api/notifications"), env);
+  const filteredBody = await filtered.json();
+  assert.equal(filteredBody.notifications.every((item) => item.eventType === "human_decision_ready"), true);
+});
+
+test("notification settings keep unknown future events enabled by default", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  await worker.fetch(
+    new Request("https://example.com/api/notifications/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "selected",
+        events: []
+      })
+    }),
+    env
+  );
+
+  const event = await worker.fetch(
+    new Request("https://example.com/api/execution-events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        executionId: "remote-codex-future-event",
+        repository: "marushu/vtdd-v3",
+        issueNumber: 4,
+        phase: "editing_files",
+        currentStep: "Runner emitted a future event.",
+        notifications: ["new future event notification"]
+      })
+    }),
+    env
+  );
+  assert.equal(event.status, 201);
+
+  const response = await worker.fetch(new Request("https://example.com/api/notifications"), env);
+  const body = await response.json();
+  assert.equal(body.notifications.some((item) => item.eventType === "future_event"), true);
+  assert.equal(body.notifications.some((item) => item.eventType === "runner_event"), false);
 });
 
 test("dispatch preview returns progress URL without executing", async () => {

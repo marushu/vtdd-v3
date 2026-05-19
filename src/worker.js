@@ -1,5 +1,6 @@
 const EXECUTION_STORE_KEY = "vtdd:v3:executions";
 const CHAT_STORE_KEY = "vtdd:v3:chats";
+const NOTIFICATION_SETTINGS_KEY = "vtdd:v3:notification-settings";
 
 const allowedPhases = [
   "queued",
@@ -54,6 +55,19 @@ const allowedDispatchTaskTypes = ["implementation", "investigation", "docs", "te
 const forbiddenDispatchTaskTypes = ["merge", "deploy", "close_issue", "credential", "dns", "delete"];
 const allowedChatStatuses = ["active", "pinned", "archived", "cold"];
 const forbiddenChatFields = ["rawTranscript", "rawLog", "terminalStream", "chainOfThought", "secret", "token", "approvalGrant", "approvalGrantId", "password", "privateKey"];
+const notificationEventTypes = [
+  { key: "runner_event", label: "Runner event" },
+  { key: "pr_created", label: "PR created" },
+  { key: "test_failed", label: "Test failed" },
+  { key: "test_passed", label: "Test passed" },
+  { key: "reviewer_objected", label: "Reviewer objected" },
+  { key: "human_decision_ready", label: "Human decision ready" },
+  { key: "deploy_required", label: "Deploy required" },
+  { key: "deploy_completed", label: "Deploy completed" },
+  { key: "execution_stale", label: "Execution stale / hung" },
+  { key: "execution_completed", label: "Execution completed" },
+  { key: "execution_failed", label: "Execution failed" }
+];
 
 const sampleExecutions = [
   {
@@ -176,6 +190,7 @@ export default {
     const url = new URL(request.url);
     const executions = await listExecutions(env);
     const chats = await listChats(env);
+    const notificationSettings = await getNotificationSettings(env);
 
     if (url.pathname === "/" || url.pathname === "/orchestrator") {
       return html(renderDashboard({ executions, chats, env, url }));
@@ -201,7 +216,11 @@ export default {
     }
 
     if (url.pathname === "/notifications") {
-      return html(renderNotifications({ executions }));
+      return html(renderNotifications({ executions, settings: notificationSettings }));
+    }
+
+    if (url.pathname === "/notifications/settings") {
+      return html(renderNotificationSettings({ settings: notificationSettings }));
     }
 
     if (url.pathname === "/butler") {
@@ -239,7 +258,18 @@ export default {
     }
 
     if (url.pathname === "/api/notifications") {
-      return json({ ok: true, notifications: buildNotifications(executions) });
+      return json({ ok: true, notifications: buildNotifications(executions, notificationSettings) });
+    }
+
+    if (url.pathname === "/api/notifications/settings" && request.method === "GET") {
+      return json({ ok: true, settings: notificationSettings, eventTypes: notificationEventTypes });
+    }
+
+    if (url.pathname === "/api/notifications/settings" && request.method === "POST") {
+      const body = await readBody(request);
+      const settings = buildNotificationSettings(body);
+      await saveNotificationSettings(env, settings);
+      return json({ ok: true, settings }, 200);
     }
 
     if (url.pathname === "/api/chats" && request.method === "GET") {
@@ -458,6 +488,27 @@ async function saveChats(env, chats) {
   const store = env?.EXECUTION_STORE;
   if (!store?.put) return false;
   await store.put(CHAT_STORE_KEY, JSON.stringify(chats.map(normalizeChat)));
+  return true;
+}
+
+async function getNotificationSettings(env) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) return defaultNotificationSettings();
+
+  const raw = await store.get(NOTIFICATION_SETTINGS_KEY);
+  if (!raw) return defaultNotificationSettings();
+
+  try {
+    return normalizeNotificationSettings(JSON.parse(raw));
+  } catch {
+    return defaultNotificationSettings();
+  }
+}
+
+async function saveNotificationSettings(env, settings) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(NOTIFICATION_SETTINGS_KEY, JSON.stringify(normalizeNotificationSettings(settings)));
   return true;
 }
 
@@ -795,8 +846,8 @@ function renderDecisions({ executions }) {
   });
 }
 
-function renderNotifications({ executions }) {
-  const notifications = buildNotifications(executions);
+function renderNotifications({ executions, settings }) {
+  const notifications = buildNotifications(executions, settings);
   return page({
     title: "VTDD 通知",
     body: `
@@ -804,9 +855,41 @@ function renderNotifications({ executions }) {
         <p class="eyebrow">Owner signal</p>
         <h1>通知</h1>
         <p>ChatGPT スレッドを探し回らずに、開発の変化だけを追える通知一覧です。</p>
-        <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/api/notifications">JSON</a></div>
+        <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/notifications/settings">通知設定</a><a class="button" href="/api/notifications">JSON</a></div>
       </section>
       <div class="stack">${notifications.map(renderNotification).join("")}</div>
+    `
+  });
+}
+
+function renderNotificationSettings({ settings }) {
+  return page({
+    title: "VTDD 通知設定",
+    body: `
+      <section class="hero">
+        <p class="eyebrow">Notification routing</p>
+        <h1>通知設定</h1>
+        <p>最初は全イベントを通知します。後から本当に欲しいイベントだけに絞れます。新しいイベント種別は default ON なので、途中追加しても見落としません。</p>
+        <div class="actions hero-actions"><a class="button" href="/notifications">通知</a><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/api/notifications/settings">JSON</a></div>
+      </section>
+      <section class="card wide">
+        <h2>通知するイベント</h2>
+        <form method="post" action="/api/notifications/settings" class="form-grid">
+          <input type="hidden" name="mode" value="selected">
+          ${notificationEventTypes.map((eventType) => `
+            <label class="check-row">
+              <input type="checkbox" name="events" value="${escapeAttribute(eventType.key)}" ${isNotificationEnabled(settings, eventType.key) ? "checked" : ""}>
+              <span>${escapeHtml(eventType.label)}</span>
+              <code>${escapeHtml(eventType.key)}</code>
+            </label>
+          `).join("")}
+          <button class="button primary" type="submit">設定 JSON を保存</button>
+        </form>
+      </section>
+      <section class="notice">
+        <h2>初期値</h2>
+        <p>設定がまだない場合は全イベント ON です。保存後も未知の新イベントは ON として扱います。</p>
+      </section>
     `
   });
 }
@@ -957,7 +1040,7 @@ function renderDecisionItem(item) {
 }
 
 function renderNotification(item) {
-  return `<article class="card wide"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.message)}</p><p class="muted">${escapeHtml(formatDate(item.createdAt))} / ${escapeHtml(item.executionId)}</p><a class="button" href="${escapeAttribute(item.progressUrl)}">進捗を開く</a></article>`;
+  return `<article class="card wide"><p class="eyebrow">${escapeHtml(item.eventType)}</p><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.message)}</p><p class="muted">${escapeHtml(formatDate(item.createdAt))} / ${escapeHtml(item.executionId)}</p><a class="button" href="${escapeAttribute(item.progressUrl)}">進捗を開く</a></article>`;
 }
 
 function buildDecisionItems(executions) {
@@ -973,15 +1056,119 @@ function buildDecisionItems(executions) {
     }));
 }
 
-function buildNotifications(executions) {
-  return executions.flatMap((execution) =>
-    (execution.notifications || []).map((message, index) => ({
+function notificationItemsForExecution(execution) {
+  const baseTime = Date.parse(execution.lastUpdatedAt || new Date());
+  const items = (execution.notifications || []).map((message, index) => ({
+    executionId: execution.executionId,
+    eventType: inferNotificationEventType(execution, message),
+    title: `${execution.repository} #${execution.issueNumber}`,
+    message,
+    progressUrl: `/progress/${encodeURIComponent(execution.executionId)}`,
+    createdAt: new Date(baseTime + index).toISOString()
+  }));
+
+  if (execution.nextHumanAction && execution.nextHumanAction !== "wait") {
+    items.push({
       executionId: execution.executionId,
+      eventType: "human_decision_ready",
       title: `${execution.repository} #${execution.issueNumber}`,
-      message,
+      message: `人間の判断が必要です: ${displayNextAction(execution.nextHumanAction)}`,
       progressUrl: `/progress/${encodeURIComponent(execution.executionId)}`,
-      createdAt: new Date(Date.parse(execution.lastUpdatedAt || new Date()) + index).toISOString()
-    }))
+      createdAt: new Date(baseTime + items.length).toISOString()
+    });
+  }
+
+  if (execution.status === "completed") {
+    items.push({
+      executionId: execution.executionId,
+      eventType: "execution_completed",
+      title: `${execution.repository} #${execution.issueNumber}`,
+      message: "Execution completed.",
+      progressUrl: `/progress/${encodeURIComponent(execution.executionId)}`,
+      createdAt: new Date(baseTime + items.length).toISOString()
+    });
+  }
+
+  if (execution.status === "failed") {
+    items.push({
+      executionId: execution.executionId,
+      eventType: "execution_failed",
+      title: `${execution.repository} #${execution.issueNumber}`,
+      message: execution.blocker || "Execution failed.",
+      progressUrl: `/progress/${encodeURIComponent(execution.executionId)}`,
+      createdAt: new Date(baseTime + items.length).toISOString()
+    });
+  }
+
+  if (execution.status === "stale") {
+    items.push({
+      executionId: execution.executionId,
+      eventType: "execution_stale",
+      title: `${execution.repository} #${execution.issueNumber}`,
+      message: "Execution is stale or hung.",
+      progressUrl: `/progress/${encodeURIComponent(execution.executionId)}`,
+      createdAt: new Date(baseTime + items.length).toISOString()
+    });
+  }
+
+  return items;
+}
+
+function inferNotificationEventType(execution, message) {
+  const text = `${execution.phase || ""} ${execution.status || ""} ${message || ""}`.toLowerCase();
+  if (/future event|future_event|新イベント/.test(text)) return "future_event";
+  if (/pr|pull request/.test(text)) return "pr_created";
+  if (/test.*fail|failed test|テスト.*失敗/.test(text)) return "test_failed";
+  if (/test.*pass|passed test|テスト.*成功/.test(text)) return "test_passed";
+  if (/reviewer.*object|objected|review.*fail|指摘/.test(text)) return "reviewer_objected";
+  if (/deploy.*required|deploy required|デプロイ.*必要/.test(text)) return "deploy_required";
+  if (/deploy.*completed|deploy success|デプロイ.*完了|cloudflare deploy 成功/.test(text)) return "deploy_completed";
+  if (/stale|hung|停滞/.test(text)) return "execution_stale";
+  if (execution.nextHumanAction && execution.nextHumanAction !== "wait") return "human_decision_ready";
+  return "runner_event";
+}
+
+function defaultNotificationSettings() {
+  return {
+    mode: "all",
+    enabledEvents: notificationEventTypes.map((eventType) => eventType.key),
+    unknownEventsDefaultEnabled: true,
+    updatedAt: null
+  };
+}
+
+function normalizeNotificationSettings(settings) {
+  const mode = normalizeText(settings?.mode) === "selected" ? "selected" : "all";
+  const enabledEvents = normalizeStringList(settings?.enabledEvents || settings?.events);
+  return {
+    mode,
+    enabledEvents,
+    unknownEventsDefaultEnabled: settings?.unknownEventsDefaultEnabled !== false,
+    updatedAt: normalizeTimestamp(settings?.updatedAt)
+  };
+}
+
+function buildNotificationSettings(body) {
+  const events = Array.isArray(body.events) ? body.events : [body.events].filter(Boolean);
+  return normalizeNotificationSettings({
+    mode: normalizeText(body.mode) || "selected",
+    enabledEvents: events,
+    unknownEventsDefaultEnabled: body.unknownEventsDefaultEnabled !== "false",
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function isNotificationEnabled(settings, eventType) {
+  const normalized = normalizeNotificationSettings(settings);
+  if (normalized.mode === "all") return true;
+  if (normalized.enabledEvents.includes(eventType)) return true;
+  const known = notificationEventTypes.some((item) => item.key === eventType);
+  return !known && normalized.unknownEventsDefaultEnabled;
+}
+
+function buildNotifications(executions, settings = defaultNotificationSettings()) {
+  return executions.flatMap((execution) =>
+    notificationItemsForExecution(execution).filter((item) => isNotificationEnabled(settings, item.eventType))
   );
 }
 
@@ -1649,6 +1836,9 @@ function page({ title, body, refreshSeconds = null }) {
     .row-link em { color:#64736c; font-style:normal; font-size:13px; }
     .form-grid { display:grid; gap:12px; }
     label { display:grid; gap:5px; color:#52635b; }
+    .check-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; color:#24362f; border:1px solid #dce3dc; border-radius:6px; padding:10px; }
+    .check-row input { min-height:auto; }
+    .check-row code { color:#64736c; font-size:12px; }
     input, select, textarea { min-height:38px; border:1px solid #cbd5cc; border-radius:6px; padding:8px 10px; font:inherit; background:#fff; }
     textarea { resize:vertical; line-height:1.45; }
     .dispatch-form { margin-top:16px; padding-top:16px; border-top:1px solid #e1e6df; }
