@@ -130,6 +130,7 @@ test("deploy monitor syncs GitHub Actions run into dashboard execution", async (
   const pageHtml = await page.text();
   assert.equal(pageHtml.includes("Deploy run を拾う"), true);
   assert.equal(pageHtml.includes("workflowRepository"), true);
+  assert.equal(pageHtml.includes("workflowRepository=marushu%2Fvtdd-v3"), true);
   assert.equal(pageHtml.includes("/api/github/deploy-run-sync"), true);
 
   const list = await worker.fetch(
@@ -165,6 +166,34 @@ test("deploy monitor syncs GitHub Actions run into dashboard execution", async (
   const notifications = await worker.fetch(new Request("https://example.com/api/notifications"), env);
   const notificationBody = await notifications.json();
   assert.equal(notificationBody.notifications.some((item) => item.eventType === "deploy_failed"), true);
+});
+
+test("v3 deploy workflow and approval validation keep v2/v3 scopes separate", async () => {
+  const fs = await import("node:fs/promises");
+  const workflow = await fs.readFile(".github/workflows/deploy-production.yml", "utf8");
+  const separationDoc = await fs.readFile("docs/architecture/v2-v3-separation.md", "utf8");
+  const { validateDeployApprovalGrant } = await import("../scripts/validate-deploy-approval-grant.mjs");
+
+  assert.equal(workflow.includes("target_repository"), true);
+  assert.equal(workflow.includes("target_repository must match this v3 repository."), true);
+  assert.equal(workflow.includes("--repository \"${{ github.event.inputs.target_repository }}\""), true);
+  assert.equal(workflow.includes("wrangler-action@v4"), true);
+  assert.equal(separationDoc.includes("legacy approval provider"), true);
+  assert.equal(separationDoc.includes("v2 repository の `deploy-production.yml` で v3 Worker を deploy しない"), true);
+
+  const approvalGrant = {
+    verified: true,
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+    scope: {
+      actionType: "deploy_production",
+      highRiskKind: "deploy_production",
+      repositoryInput: "marushu/vtdd-v3"
+    }
+  };
+  assert.equal(validateDeployApprovalGrant({ approvalGrant, repositoryInput: "marushu/vtdd-v3" }).ok, true);
+  const wrongScope = validateDeployApprovalGrant({ approvalGrant, repositoryInput: "marushu/vtdd-v2-p" });
+  assert.equal(wrongScope.ok, false);
+  assert.equal(wrongScope.issues.includes("approvalGrant scope.repositoryInput must match target repo"), true);
 });
 
 test("notification settings default to all events and can filter known event types", async () => {

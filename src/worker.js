@@ -1491,14 +1491,14 @@ function renderDeployMonitor({ url }) {
         <div class="actions hero-actions">
           <a class="button" href="/orchestrator">Dashboard</a>
           <a class="button" href="/notifications">通知</a>
-          <a class="button" href="/api/github/deploy-runs?targetRepository=marushu%2Fvtdd-v3&workflowRepository=marushu%2Fvtdd-v2-p&workflow=deploy-production.yml&limit=5">最新 run JSON</a>
+          <a class="button" href="/api/github/deploy-runs?targetRepository=marushu%2Fvtdd-v3&workflowRepository=marushu%2Fvtdd-v3&workflow=deploy-production.yml&limit=5">最新 run JSON</a>
         </div>
       </section>
       <section class="card wide">
         <h2>GitHub deploy run sync</h2>
         <form id="deploy-run-sync-form" class="form-grid">
           <label>Target repository <input name="targetRepository" value="marushu/vtdd-v3"></label>
-          <label>Workflow repository <input name="workflowRepository" value="marushu/vtdd-v2-p"></label>
+          <label>Workflow repository <input name="workflowRepository" value="marushu/vtdd-v3"></label>
           <label>Workflow file <input name="workflow" value="deploy-production.yml"></label>
           <label>Run ID <input name="runId" placeholder="空なら最新 run"></label>
           <button class="button primary" type="submit">deploy run を dashboard に同期</button>

@@ -1,0 +1,155 @@
+name: deploy-production
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_phrase:
+        description: "Type GO to approve production deploy"
+        required: true
+        type: string
+      runtime_url:
+        description: "Worker runtime URL used to validate the real passkey approval grant"
+        required: true
+        type: string
+      approval_grant_id:
+        description: "Real WebAuthn/passkey approval grant id for deploy_production"
+        required: true
+        type: string
+      target_repository:
+        description: "Repository that the approval grant is scoped to"
+        required: true
+        default: "marushu/vtdd-v3"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Enforce v3 deploy boundary
+        shell: bash
+        run: |
+          if [ "${{ github.event.inputs.approval_phrase }}" != "GO" ]; then
+            echo "Approval phrase must be GO for production deploy."
+            exit 1
+          fi
+          if [ "${{ github.event.inputs.target_repository }}" != "${{ github.repository }}" ]; then
+            echo "target_repository must match this v3 repository."
+            echo "target_repository=${{ github.event.inputs.target_repository }}"
+            echo "github.repository=${{ github.repository }}"
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.runtime_url }}" ]; then
+            echo "runtime_url is required for production deploy."
+            exit 1
+          fi
+          if [ -z "${{ github.event.inputs.approval_grant_id }}" ]; then
+            echo "approval_grant_id is required for production deploy."
+            exit 1
+          fi
+
+      - name: Preflight deploy credentials
+        env:
+          VTDD_GATEWAY_BEARER_TOKEN: ${{ secrets.VTDD_GATEWAY_BEARER_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          missing=0
+          if [ -z "$VTDD_GATEWAY_BEARER_TOKEN" ]; then
+            echo "Missing required Actions secret: VTDD_GATEWAY_BEARER_TOKEN"
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "Missing required Actions secret: CLOUDFLARE_API_TOKEN"
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Missing required Actions secret: CLOUDFLARE_ACCOUNT_ID"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Configure the missing v3 secrets before requesting GO + passkey for production deploy."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate real passkey approval grant
+        env:
+          VTDD_GATEWAY_BEARER_TOKEN: ${{ secrets.VTDD_GATEWAY_BEARER_TOKEN }}
+        run: |
+          node scripts/validate-deploy-approval-grant.mjs \
+            --runtime-url "${{ github.event.inputs.runtime_url }}" \
+            --approval-grant-id "${{ github.event.inputs.approval_grant_id }}" \
+            --repository "${{ github.event.inputs.target_repository }}"
+
+      - name: Run tests
+        run: npm test
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v4
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4.83.0"
+          command: deploy src/worker.js
+
+      - name: Notify deploy completion
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_NOTIFICATION_ISSUE_NUMBER: ${{ vars.VTDD_DEPLOY_NOTIFICATION_ISSUE_NUMBER }}
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_ACTOR: ${{ github.actor }}
+          RUNTIME_URL: ${{ github.event.inputs.runtime_url }}
+        shell: bash
+        run: |
+          if [ -z "$DEPLOY_NOTIFICATION_ISSUE_NUMBER" ]; then
+            echo "VTDD_DEPLOY_NOTIFICATION_ISSUE_NUMBER is not set; skipping GitHub mention notification."
+            exit 0
+          fi
+          if [[ ! "$DEPLOY_NOTIFICATION_ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "VTDD_DEPLOY_NOTIFICATION_ISSUE_NUMBER must be a GitHub issue number."
+            exit 1
+          fi
+
+          body=$(cat <<EOF
+          @${REPOSITORY_OWNER} v3 deploy-production finished: ${DEPLOY_JOB_STATUS}.
+
+          - Repository: \`${REPOSITORY}\`
+          - Commit: \`${DEPLOY_SHA}\`
+          - Actor: \`${DEPLOY_ACTOR}\`
+          - Runtime URL: ${RUNTIME_URL}
+          - Run: ${RUN_URL}
+
+          This is a GitHub-visible deploy milestone notification. No approval grant id, token, or secret value is included.
+          EOF
+          )
+
+          gh api \
+            "repos/${REPOSITORY}/issues/${DEPLOY_NOTIFICATION_ISSUE_NUMBER}/comments" \
+            -f body="$body"
