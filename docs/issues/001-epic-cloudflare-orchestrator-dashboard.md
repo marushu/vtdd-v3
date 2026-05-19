@@ -1,31 +1,28 @@
-# Epic: VTDD v3 Cloudflare Orchestrator Dashboard
+# Epic: VTDD v3 Cloudflare オーケストレーターダッシュボード
 
-## Intent
+## 意図
 
-Build the Cloudflare dashboard that becomes VTDD's primary work home.
+VTDD の主作業場になる Cloudflare dashboard を作る。
 
-The owner should not need to find the correct ChatGPT thread to understand what
-is running, blocked, completed, ready for review, or waiting for GO.
+オーナーが「どの ChatGPT スレッドだったか」を探さなくても、何が実行中で、何が詰まり、何が完了し、何が review / GO 待ちか分かる状態にする。
 
-## Success Criteria
+## 成功条件
 
-- `/orchestrator` lists active and completed executions.
-- Each execution has a stable `/progress/:executionId` page.
-- Dashboard cards show repo, issue, branch, phase, progress, PR URL, blocker,
-  last update, and next human action.
-- The dashboard can represent work from multiple repositories.
-- The dashboard does not expose secrets, approval grants, raw logs, or
-  chain-of-thought.
-- High-risk actions are links into governed operator flows, not silent actions.
+- `/orchestrator` が active / completed execution を一覧できる。
+- 各 execution に安定した `/progress/:executionId` ページがある。
+- Dashboard card が repo、Issue、branch、phase、progress、PR URL、blocker、last update、next human action を表示する。
+- 複数 repository の work を同じ dashboard で扱える。
+- secret、approval grant、raw log、chain-of-thought を表示しない。
+- 高リスク操作は silent action ではなく、governed operator flow への導線として表示する。
 
-## Non-goals
+## 非ゴール
 
-- Natural-language Butler replacement in the first slice.
-- DNS migration for `vtdd.hibou-web.com`.
-- Hosted SaaS billing.
-- Automatic merge/deploy/close.
+- 初期 slice で自然言語 Butler を完全代替すること。
+- `vtdd.hibou-web.com` の DNS 移行。
+- hosted SaaS billing。
+- 自動 merge / deploy / close。
 
-## Validation
+## 検証
 
-- Worker tests for dashboard routes and API JSON.
-- Manual browser check on desktop and iPhone viewport after deploy.
+- Worker route と API JSON の test。
+- deploy 後の desktop / iPhone viewport での目視確認。

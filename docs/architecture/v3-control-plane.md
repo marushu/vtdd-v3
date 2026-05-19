@@ -2,17 +2,15 @@
 
 ## Thesis
 
-VTDD v3 should not treat a ChatGPT thread as the operational home. The durable
-home is a Cloudflare dashboard backed by GitHub truth, VPS Codex CLI execution
-events, and explicit authority gates.
+VTDD v3 は ChatGPT thread を operational home として扱わない。durable home は GitHub truth、VPS Codex CLI execution event、明示的な authority gate に支えられた Cloudflare dashboard である。
 
 ## Roles
 
-- Cloudflare Worker: dashboard, API routes, policy gates, operator pages.
-- VPS Codex CLI: LLM brain and implementation runner.
-- GitHub: durable Issues, PRs, checks, branches, comments, and queue records.
-- Passkey operator: high-risk approval boundary.
-- Custom GPT: optional conversational surface and migration compatibility.
+- Cloudflare Worker: dashboard、API route、policy gate、operator page。
+- VPS Codex CLI: LLM brain と implementation runner。
+- GitHub: durable Issues、PRs、checks、branches、comments、queue records。
+- Passkey operator: high-risk approval boundary。
+- Custom GPT: optional conversational surface と migration compatibility。
 
 ## Initial Data Model
 
@@ -34,15 +32,15 @@ Execution record:
 
 ## Owner-Facing Pages
 
-- `/orchestrator`: multi-repo work inbox.
-- `/progress/:executionId`: single execution waiting room.
-- `/decisions`: merge/deploy/close/retry queue.
+- `/orchestrator`: 複数 repo の work inbox。
+- `/progress/:executionId`: 単一 execution の waiting room。
+- `/decisions`: merge / deploy / close / retry queue。
 
 ## Authority Boundary
 
-Read-only dashboard operations do not need GO.
+read-only dashboard operation は GO 不要。
 
-The following require GO + real passkey:
+以下は GO + real passkey が必要。
 
 - merge
 - deploy
@@ -51,16 +49,16 @@ The following require GO + real passkey:
 - permission mutation
 - destructive cleanup
 - repository administration
-- policy changes that relax authority gates
+- authority gate を緩める policy change
 
-## Migration From v2
+## v2 からの移行
 
-Reuse concepts from `vtdd-v2-p`:
+`vtdd-v2-p` から以下の概念を再利用する。
 
 - passkey approval model
-- GitHub App read/write boundaries
-- VPS runner queue and execution IDs
+- GitHub App read/write boundary
+- VPS runner queue と execution ID
 - generated PR body discipline
 - runtime truth over memory
 
-Do not inherit the Custom GPT Action Schema as the primary product surface.
+Custom GPT Action Schema を primary product surface として継承しない。

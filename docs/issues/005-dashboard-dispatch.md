@@ -1,20 +1,19 @@
-# Issue: Dashboard dispatch to VPS Codex CLI
+# Issue: Dashboard から VPS Codex CLI へ dispatch
 
-## Intent
+## 意図
 
-Allow the owner to start a VPS Codex CLI execution from the Cloudflare
-dashboard without going through a Custom GPT thread.
+Custom GPT thread を経由せず、Cloudflare dashboard から VPS Codex CLI execution を開始できるようにする。
 
-## Success Criteria
+## 成功条件
 
-- Owner can choose repo, issue, and task type.
-- Dispatch creates an executionId and queue record.
-- Dashboard immediately shows the progress page URL.
-- Dispatch does not require OpenAI API credits from the Worker.
-- High-risk actions are not executed by dispatch.
+- オーナーが repo、Issue、task type を選べる。
+- Dispatch が executionId と queue record を作る。
+- Dashboard が progress page URL を即時に表示する。
+- Dispatch は Worker 上で OpenAI API credit を消費しない。
+- 高リスク操作は dispatch で実行されない。
 
-## Non-goals
+## 非ゴール
 
-- Full natural-language intent parsing.
-- Merge/deploy/close execution.
-- DNS or credential mutation.
+- 完全な自然言語 intent parsing。
+- merge / deploy / close execution。
+- DNS または credential mutation。

@@ -1,29 +1,28 @@
-# Issue: Owner notifications
+# Issue: オーナー通知
 
-## Intent
+## 意図
 
-Notify the owner when work changes state without requiring the owner to poll
-ChatGPT threads.
+ChatGPT thread を polling しなくても、work の状態変化をオーナーへ通知する。
 
-## Candidate Events
+## 候補イベント
 
-- PR created.
-- tests failed.
-- tests passed.
-- reviewer objected.
-- ready for human decision.
-- deploy required.
-- deploy completed.
-- execution stale or hung.
+- PR created。
+- test failed。
+- test passed。
+- reviewer objected。
+- human decision ready。
+- deploy required。
+- deploy completed。
+- execution stale / hung。
 
-## Success Criteria
+## 成功条件
 
-- Dashboard has an unread notification center.
-- Notifications link to progress pages and PRs.
-- External push channel is pluggable.
-- No secret or approval grant value is included.
+- Dashboard に unread notification center がある。
+- 通知が progress page と PR にリンクする。
+- 外部 push channel を差し替え可能にする。
+- secret や approval grant value を含めない。
 
-## Non-goals
+## 非ゴール
 
-- SMS delivery in MVP.
-- Team notification routing.
+- MVP での SMS delivery。
+- team notification routing。

@@ -1,28 +1,26 @@
-# Issue: GitHub App roles and runner credentials for v3
+# Issue: v3 GitHub App 権限と runner credential
 
-## Intent
+## 意図
 
-Mirror the v2 role separation model for VTDD v3 without granting standing
-admin power to the dashboard.
+Dashboard に standing admin power を持たせず、v2 の role separation model を VTDD v3 に移植する。
 
-## Required Roles
+## 必要な role
 
-- VTDD v3 Orchestrator read/write app for repository runtime truth.
-- VTDD VPS Codex CLI app for runner-owned implementation branches and PRs.
-- VTDD reviewer app for reviewer comments and reviewer marker writeback.
-- Optional mac Codex app for emergency/local maintenance.
+- VTDD v3 Orchestrator read/write app: repository runtime truth 用。
+- VTDD VPS Codex CLI app: runner-owned implementation branch と PR 用。
+- VTDD reviewer app: reviewer comment と reviewer marker writeback 用。
+- 任意の mac Codex app: emergency / local maintenance 用。
 
-## Success Criteria
+## 成功条件
 
-- Required GitHub App roles are documented with visible bot identity.
-- Required repository permissions are listed per role.
-- Required Actions secrets / Worker secrets are listed without secret values.
-- Missing app credentials degrade safely and appear on the dashboard.
-- App installation, permission mutation, and secret sync remain GO + passkey
-  governed operations.
+- 必要な GitHub App role と visible bot identity を文書化する。
+- role ごとの repository permission を列挙する。
+- 必要な Actions secrets / Worker secrets を secret value なしで列挙する。
+- app credential が不足している場合は安全に degrade し、dashboard に表示する。
+- app installation、permission mutation、secret sync は GO + passkey governed operation のままにする。
 
-## Non-goals
+## 非ゴール
 
-- Creating GitHub Apps without explicit governed approval.
-- Adding human collaborators.
-- Sharing owner credentials.
+- 明示的な governed approval なしで GitHub App を作成すること。
+- human collaborator の追加。
+- owner credential の共有。

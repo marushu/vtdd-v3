@@ -1,22 +1,18 @@
-# Issue: VPS Codex CLI execution event contract
+# Issue: VPS Codex CLI 進捗イベント契約
 
-## Intent
+## 意図
 
-Define the event contract that lets VPS Codex CLI report progress to the
-Cloudflare dashboard.
+VPS Codex CLI が Cloudflare dashboard へ進捗を報告できる event contract を定義する。
 
-## Success Criteria
+## 成功条件
 
-- Runner can emit `queued`, `picked_up`, `codex_starting`, `planning`,
-  `editing_files`, `running_tests`, `pushing_branch`, `creating_pr`,
-  `waiting_review`, `completed`, `failed`, `canceled`, and `stale`.
-- Events include `executionId`, repo, issue, branch, phase, current step,
-  touched files if safe, PR URL if available, blocker, and timestamp.
-- Events are safe for owner-facing display.
-- No full terminal stream or chain-of-thought is exposed.
+- Runner が `queued`, `picked_up`, `codex_starting`, `planning`, `editing_files`, `running_tests`, `pushing_branch`, `creating_pr`, `waiting_review`, `completed`, `failed`, `canceled`, `stale` を送れる。
+- Event が `executionId`, repo, issue, branch, phase, current step, 安全な touched files, PR URL, blocker, timestamp を含められる。
+- Event は owner-facing 表示に安全な形へ制限される。
+- full terminal stream や chain-of-thought を公開しない。
 
-## Non-goals
+## 非ゴール
 
-- Parallel scheduling policy.
-- Notification delivery.
-- Retry/cancel controls.
+- 並列 scheduling policy。
+- 通知 delivery。
+- retry / cancel control。

@@ -91,7 +91,7 @@ const sampleExecutions = [
     executionId: "remote-codex-v3-dashboard-mvp",
     repository: "marushu/vtdd-v3",
     issueNumber: 1,
-    title: "Cloudflare Orchestrator Dashboard MVP",
+    title: "Cloudflare オーケストレーターダッシュボード MVP",
     branch: "main",
     status: "running",
     phase: "running_tests",
@@ -107,13 +107,13 @@ const sampleExecutions = [
 ];
 
 const issueCatalog = [
-  { number: 1, title: "Epic: VTDD v3 Cloudflare Orchestrator Dashboard", status: "open" },
+  { number: 1, title: "Epic: VTDD v3 Cloudflare オーケストレーターダッシュボード", status: "open" },
   { number: 2, title: "VPS Codex CLI 進捗イベント契約", status: "open" },
   { number: 3, title: "人間の判断キュー", status: "open" },
   { number: 4, title: "オーナー通知", status: "open" },
-  { number: 5, title: "Dashboard から VPS Codex CLI へ dispatch", status: "open" },
+  { number: 5, title: "Dashboard から VPS Codex CLI へ開発を投げる", status: "open" },
   { number: 6, title: "vtdd.hibou-web.com の Cloudflare 移行検討", status: "open" },
-  { number: 7, title: "v3 GitHub App 権限と runner credential", status: "planned" }
+  { number: 7, title: "v3 GitHub App 権限と runner 認証情報", status: "planned" }
 ];
 
 export default {

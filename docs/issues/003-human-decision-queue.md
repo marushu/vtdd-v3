@@ -1,20 +1,18 @@
-# Issue: Human decision queue
+# Issue: 人間の判断キュー
 
-## Intent
+## 意図
 
-Create a dashboard queue for work that is waiting on the owner.
+オーナー判断待ちの work を dashboard の queue として集約する。
 
-## Success Criteria
+## 成功条件
 
-- Queue groups items by `merge GO`, `deploy GO`, `issue close GO`, `review
-  needed`, `investigation needed`, and `blocked`.
-- Each item links to the PR, Issue, progress page, and governed operator URL
-  when relevant.
-- High-risk actions stay behind GO + real passkey.
-- The owner can inspect evidence before deciding.
+- Queue が `merge GO`, `deploy GO`, `issue close GO`, `review needed`, `investigation needed`, `blocked` を分類できる。
+- 各 item が PR、Issue、progress page、必要に応じた governed operator URL へリンクする。
+- 高リスク操作は GO + real passkey の後ろに残る。
+- オーナーが判断前に evidence を確認できる。
 
-## Non-goals
+## 非ゴール
 
-- Automatic merge.
-- Automatic deploy.
-- Automatic issue close.
+- 自動 merge。
+- 自動 deploy。
+- 自動 Issue close。

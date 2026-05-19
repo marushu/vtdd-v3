@@ -1,28 +1,26 @@
-# Issue: Evaluate vtdd.hibou-web.com migration to Cloudflare
+# Issue: vtdd.hibou-web.com の Cloudflare 移行検討
 
-## Intent
+## 意図
 
-Evaluate whether `vtdd.hibou-web.com` should point to the VTDD v3 Cloudflare
-orchestrator.
+`vtdd.hibou-web.com` を VTDD v3 Cloudflare orchestrator へ向けるべきか評価する。
 
-## Current DNS Truth
+## 現在の DNS truth
 
-- `vtdd.hibou-web.com` A record resolves to `163.43.87.169`.
-- Reverse DNS: `www3929.sakura.ne.jp`.
-- WHOIS network: SAKURA Internet Inc.
-- `hibou-web.com` nameservers are Route 53 nameservers.
-- `https://vtdd.hibou-web.com/` currently returns HTTP 200 from nginx.
+- `vtdd.hibou-web.com` の A record は `163.43.87.169`。
+- Reverse DNS は `www3929.sakura.ne.jp`。
+- WHOIS network は SAKURA Internet Inc.。
+- `hibou-web.com` の nameserver は Route 53。
+- `https://vtdd.hibou-web.com/` は現在 nginx から HTTP 200 を返す。
 
-## Success Criteria
+## 成功条件
 
-- Current host ownership and content are identified.
-- Migration plan names whether to use Route 53 CNAME/A record, Cloudflare
-  custom domain, or full zone migration.
-- Rollback plan is documented.
-- DNS mutation is gated by GO + passkey.
+- 現 host の ownership と content を特定する。
+- Route 53 CNAME/A record、Cloudflare custom domain、full zone migration のどれを使うか migration plan に明記する。
+- rollback plan を文書化する。
+- DNS mutation は GO + passkey の後ろに置く。
 
-## Non-goals
+## 非ゴール
 
-- Changing DNS in this Issue.
-- Deleting Sakura-hosted content.
-- Changing Cloudflare secrets.
+- この Issue 内で DNS を変更すること。
+- Sakura-hosted content の削除。
+- Cloudflare secret の変更。

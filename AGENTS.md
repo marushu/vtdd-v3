@@ -2,41 +2,42 @@
 
 ## Purpose
 
-VTDD v3 is the Cloudflare-native orchestrator for VTDD development work.
+VTDD v3 は VTDD 開発作業の Cloudflare-native orchestrator です。
 
-The product goal is to let the owner manage multiple GitHub repositories,
-VPS Codex CLI executions, PRs, checks, reviewer signals, and human decision
-queues from iPhone/iPad without relying on ChatGPT thread history as the source
-of truth.
+Product goal は、オーナーが ChatGPT thread history を source of truth にせず、iPhone / iPad から複数 GitHub repository、VPS Codex CLI execution、PR、checks、reviewer signal、人間の判断 queue を管理できるようにすることです。
 
 ## Core Rules
 
-- GitHub runtime truth beats memory.
-- ChatGPT threads are optional conversation surfaces, not execution truth.
-- Cloudflare dashboard is the owner-facing home.
-- VPS Codex CLI is the execution runner.
-- GitHub Issues / PRs / checks / comments are durable work records.
-- High-risk actions require explicit GO + real passkey.
-- Never mutate DNS, credentials, permissions, repository settings, deploys, or
-  destructive resources without governed approval.
-- Do not expose chain-of-thought, full terminal logs, secrets, tokens, approval
-  grant values, or raw sensitive material in dashboards.
+- GitHub runtime truth は memory より強い。
+- ChatGPT thread は optional な conversation surface であり、execution truth ではない。
+- Cloudflare dashboard が owner-facing home。
+- VPS Codex CLI が execution runner。
+- GitHub Issues / PRs / checks / comments が durable work record。
+- 高リスク操作には明示的な GO + real passkey が必要。
+- governed approval なしに DNS、credential、permission、repository settings、deploy、destructive resource を変更しない。
+- dashboard に chain-of-thought、full terminal logs、secrets、tokens、approval grant values、raw sensitive material を出さない。
+
+## 日本語運用ルール
+
+- Owner-facing の Issue title / Issue body / Issue comment / PR title / PR body / review response / docs は日本語を default にする。
+- API field、route、phase/status enum、code symbol、test identifier は runner 契約または実装都合として英語のままでよい。
+- PR body は Issue の成功条件、変更内容、検証、残りリスクを日本語で対応づける。
+- 英語で Issue / PR を作ってしまった場合は、実装より先に日本語へ戻す。
 
 ## Completion Boundary
 
-A v3 feature is complete only when:
+v3 feature は以下を満たしたときだけ complete と扱う。
 
-- the dashboard can expose it,
-- the runner or GitHub truth can update it,
-- the owner can recover from iPhone/iPad,
-- authority boundaries are visible,
-- tests or live evidence prove the workflow.
+- dashboard がその機能を expose できる。
+- runner または GitHub truth がその状態を update できる。
+- オーナーが iPhone / iPad から recover できる。
+- authority boundary が見える。
+- test または live evidence が workflow を証明している。
 
 ## Development Style
 
-- Prefer small Cloudflare Worker routes and explicit JSON contracts.
-- Keep the first dashboard MVP dependency-light.
-- Add React or a richer frontend only when the route/API contracts are stable.
-- Make every long-running execution addressable by `executionId`.
-- Every execution card should show status, phase, branch, PR URL if known,
-  blocker if any, last update, and next human action.
+- 小さな Cloudflare Worker route と明示的な JSON contract を優先する。
+- 最初の dashboard MVP は dependency-light に保つ。
+- React などの rich frontend は route / API contract が安定してから追加する。
+- long-running execution は必ず `executionId` で addressable にする。
+- execution card は status、phase、branch、PR URL、blocker、last update、next human action を表示する。
