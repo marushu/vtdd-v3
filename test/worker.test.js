@@ -234,6 +234,10 @@ test("chat detail is summary-first and links to GitHub truth", async () => {
   assert.equal(html.includes("VPS runner pickup adapter"), true);
   assert.equal(html.includes("https://github.com/marushu/vtdd-v3/issues/5"), true);
   assert.equal(html.includes("必要時だけ開く transcript"), true);
+  assert.equal(html.includes("マイク入力"), true);
+  assert.equal(html.includes("SpeechRecognition"), true);
+  assert.equal(html.includes("wakeLock"), true);
+  assert.equal(html.includes("音声認識結果は即送信せず"), true);
 });
 
 test("chat API creates safe repository-scoped chat records", async () => {
@@ -474,6 +478,10 @@ test("dashboard Butler queues owner instruction and returns progress/chat URLs",
   assert.equal(pageHtml.includes("speechSynthesis"), true);
   assert.equal(pageHtml.includes("呼称を確認して保存"), true);
   assert.equal(pageHtml.includes("外部 TTS"), false);
+  assert.equal(pageHtml.includes("マイク入力"), true);
+  assert.equal(pageHtml.includes("webkitSpeechRecognition"), true);
+  assert.equal(pageHtml.includes("wakeLock"), true);
+  assert.equal(pageHtml.includes("認識結果を確認してから queue"), true);
 
   const response = await worker.fetch(
     new Request("https://example.com/api/butler/dispatch", {

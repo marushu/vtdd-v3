@@ -11,8 +11,10 @@ Cloudflare dashboard の chat 画面から、音声入力で開発指示を text
 ## 成功条件
 
 - chat detail に mic button を追加する。
+- Butler dispatch form にも同じ mic input を置き、開発指示の入口で使える。
 - browser speech recognition が使える環境では音声を text input へ入れられる。
 - 音声認識結果は即実行せず、確認可能な text として textarea に入る。
+- 端末 / browser の `SpeechRecognition` / `webkitSpeechRecognition` を第一候補にし、外部 speech-to-text API は default にしない。
 - send すると `POST /api/chats/:chatId/messages` に owner message として保存される。
 - mic 非対応 browser では手入力へ degrade する。
 - mic mode 開始時に可能なら Screen Wake Lock を取得し、マイク終了時に解放する。
@@ -31,6 +33,7 @@ Cloudflare dashboard の chat 画面から、音声入力で開発指示を text
 
 - Worker 側で音声認識 API を呼ぶこと。
 - 音声ファイル保存。
+- OpenAI / Cloudflare / 外部 speech-to-text API を default にすること。
 - high-risk action の音声自動実行。
 - 完全な自然言語 intent router。
 - 画面ロック後の background recording 保証。

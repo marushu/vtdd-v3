@@ -773,7 +773,7 @@ function renderChatDetail({ chat, executions }) {
       </section>
       <section class="card wide">
         <h2>message を追加</h2>
-        <form method="post" action="/api/chats/${encodeURIComponent(chat.chatId)}/messages" class="form-grid">
+        <form method="post" action="/api/chats/${encodeURIComponent(chat.chatId)}/messages" class="form-grid" id="chat-message-form">
           <label>role
             <select name="role">
               <option value="owner">オーナー</option>
@@ -782,10 +782,110 @@ function renderChatDetail({ chat, executions }) {
               <option value="system">System</option>
             </select>
           </label>
-          <label>message <textarea name="text" rows="4" placeholder="この開発チャットに残すメッセージ"></textarea></label>
+          <label>message <textarea id="chat-message-text" name="text" rows="4" placeholder="この開発チャットに残すメッセージ"></textarea></label>
+          <div class="actions">
+            <button class="button" type="button" id="chat-start-mic">マイク入力</button>
+            <button class="button" type="button" id="chat-stop-mic" disabled>停止</button>
+          </div>
+          <p id="chat-mic-status" class="muted">音声認識結果は即送信せず、確認できるテキストとして入ります。</p>
           <button class="button primary" type="submit">message JSON を追加</button>
         </form>
       </section>
+      <script>
+        (() => {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          const textInput = document.getElementById("chat-message-text");
+          const status = document.getElementById("chat-mic-status");
+          const startButton = document.getElementById("chat-start-mic");
+          const stopButton = document.getElementById("chat-stop-mic");
+          let recognition = null;
+          let wakeLock = null;
+
+          const appendText = (text) => {
+            const current = textInput.value.trim();
+            textInput.value = current ? current + "\\n" + text : text;
+            textInput.focus();
+          };
+
+          const requestWakeLock = async () => {
+            if (!("wakeLock" in navigator)) {
+              status.textContent = "Wake Lock 未対応です。必要なら画面を見える状態にしてください。";
+              return;
+            }
+            try {
+              wakeLock = await navigator.wakeLock.request("screen");
+            } catch {
+              status.textContent = "Wake Lock を取得できませんでした。音声入力は続行できます。";
+            }
+          };
+
+          const releaseWakeLock = async () => {
+            if (wakeLock) {
+              await wakeLock.release();
+              wakeLock = null;
+            }
+          };
+
+          const stopMic = async () => {
+            if (recognition) recognition.stop();
+            await releaseWakeLock();
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            status.textContent = "認識結果を確認してから送信してください。";
+          };
+
+          startButton.addEventListener("click", async () => {
+            if (!SpeechRecognition) {
+              status.textContent = "この端末ではマイク入力が使えません。手入力で続行できます。";
+              return;
+            }
+            await requestWakeLock();
+            recognition = new SpeechRecognition();
+            recognition.lang = "ja-JP";
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.onstart = () => {
+              startButton.disabled = true;
+              stopButton.disabled = false;
+              status.textContent = "聞き取り中です。認識結果はまだ送信されません。";
+            };
+            recognition.onerror = async () => {
+              await releaseWakeLock();
+              startButton.disabled = false;
+              stopButton.disabled = true;
+              status.textContent = "マイク入力に失敗しました。手入力で続行できます。";
+            };
+            recognition.onend = async () => {
+              await releaseWakeLock();
+              startButton.disabled = false;
+              stopButton.disabled = true;
+            };
+            recognition.onresult = (event) => {
+              const resultItems = Array.from(event.results);
+              const finalText = resultItems
+                .filter((item) => item.isFinal)
+                .map((item) => item[0]?.transcript || "")
+                .join("")
+                .trim();
+              const interimText = resultItems
+                .filter((item) => !item.isFinal)
+                .map((item) => item[0]?.transcript || "")
+                .join("")
+                .trim();
+              status.textContent = finalText
+                ? "認識しました。内容を確認してから送信してください。"
+                : interimText || "聞き取り中です。";
+              if (finalText) appendText(finalText);
+            };
+            recognition.start();
+          });
+
+          stopButton.addEventListener("click", stopMic);
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "hidden") stopMic();
+          });
+        })();
+      </script>
     `
   });
 }
@@ -844,7 +944,12 @@ function renderButler({ url }) {
               <option value="review">レビュー</option>
             </select>
           </label>
-          <label>Butler への指示 <textarea name="message" rows="6" placeholder="例: dashboard から VPS runner に開発指示を投げて、progress と chat URL を返して"></textarea></label>
+          <label>Butler への指示 <textarea id="butler-message" name="message" rows="6" placeholder="例: dashboard から VPS runner に開発指示を投げて、progress と chat URL を返して"></textarea></label>
+          <div class="actions">
+            <button class="button" type="button" id="butler-start-mic">マイク入力</button>
+            <button class="button" type="button" id="butler-stop-mic" disabled>停止</button>
+          </div>
+          <p id="butler-mic-status" class="muted">マイク入力は即実行せず、認識結果をテキスト欄に入れてから確認します。</p>
           <button class="button primary" type="submit">queue に積む</button>
         </form>
         <div id="butler-dispatch-result" class="notice" hidden></div>
@@ -866,6 +971,13 @@ function renderButler({ url }) {
           const confirmation = document.getElementById("butler-profile-confirmation");
           const result = document.getElementById("butler-dispatch-result");
           const form = document.getElementById("butler-dispatch-form");
+          const messageInput = document.getElementById("butler-message");
+          const micStatus = document.getElementById("butler-mic-status");
+          const startMicButton = document.getElementById("butler-start-mic");
+          const stopMicButton = document.getElementById("butler-stop-mic");
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          let recognition = null;
+          let wakeLock = null;
 
           const loadProfile = () => {
             try {
@@ -961,6 +1073,91 @@ function renderButler({ url }) {
             confirmation.textContent = "承知いたしました。今後は「" + profile.callName + "」とお呼びします。";
             saveProfile(profile);
             speak("承知いたしました。今後は、" + profile.callName + "、とお呼びします。");
+          });
+
+          const appendRecognizedText = (text) => {
+            const current = messageInput.value.trim();
+            messageInput.value = current ? current + "\\n" + text : text;
+            messageInput.focus();
+          };
+
+          const requestWakeLock = async () => {
+            if (!("wakeLock" in navigator)) {
+              micStatus.textContent = "Wake Lock 未対応です。必要なら画面を見える状態にしてください。";
+              return;
+            }
+            try {
+              wakeLock = await navigator.wakeLock.request("screen");
+            } catch {
+              micStatus.textContent = "Wake Lock を取得できませんでした。音声入力は続行できます。";
+            }
+          };
+
+          const releaseWakeLock = async () => {
+            if (wakeLock) {
+              await wakeLock.release();
+              wakeLock = null;
+            }
+          };
+
+          const stopMic = async () => {
+            if (recognition) recognition.stop();
+            await releaseWakeLock();
+            startMicButton.disabled = false;
+            stopMicButton.disabled = true;
+            micStatus.textContent = "認識結果を確認してから queue に積んでください。";
+          };
+
+          startMicButton.addEventListener("click", async () => {
+            if (!SpeechRecognition) {
+              micStatus.textContent = "この端末ではマイク入力が使えません。手入力で続行できます。";
+              speak("この端末ではマイク入力が使えません。手入力で続行できます。");
+              return;
+            }
+            await requestWakeLock();
+            recognition = new SpeechRecognition();
+            recognition.lang = "ja-JP";
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.onstart = () => {
+              startMicButton.disabled = true;
+              stopMicButton.disabled = false;
+              micStatus.textContent = "聞き取り中です。認識結果はまだ実行されません。";
+            };
+            recognition.onerror = async () => {
+              await releaseWakeLock();
+              startMicButton.disabled = false;
+              stopMicButton.disabled = true;
+              micStatus.textContent = "マイク入力に失敗しました。手入力で続行できます。";
+            };
+            recognition.onend = async () => {
+              await releaseWakeLock();
+              startMicButton.disabled = false;
+              stopMicButton.disabled = true;
+            };
+            recognition.onresult = (event) => {
+              const resultItems = Array.from(event.results);
+              const finalText = resultItems
+                .filter((item) => item.isFinal)
+                .map((item) => item[0]?.transcript || "")
+                .join("")
+                .trim();
+              const interimText = resultItems
+                .filter((item) => !item.isFinal)
+                .map((item) => item[0]?.transcript || "")
+                .join("")
+                .trim();
+              micStatus.textContent = finalText
+                ? "認識しました。内容を確認してから送信してください。"
+                : interimText || "聞き取り中です。";
+              if (finalText) appendRecognizedText(finalText);
+            };
+            recognition.start();
+          });
+
+          stopMicButton.addEventListener("click", stopMic);
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "hidden") stopMic();
           });
 
           form.addEventListener("submit", async (event) => {
