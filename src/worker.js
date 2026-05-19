@@ -165,7 +165,8 @@ const issueCatalog = [
   { number: 14, title: "Butler intent router for dashboard chat", status: "planned" },
   { number: 15, title: "VPS 常駐 runner と token gate", status: "planned" },
   { number: 16, title: "chat / execution の realtime 更新", status: "planned" },
-  { number: 17, title: "同一 repository 並行開発の conflict-aware scheduler", status: "planned" }
+  { number: 17, title: "同一 repository 並行開発の conflict-aware scheduler", status: "planned" },
+  { number: 18, title: "Codex Security を reviewer signal として取り込む", status: "planned" }
 ];
 
 export default {

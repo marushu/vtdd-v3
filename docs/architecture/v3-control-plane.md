@@ -11,6 +11,7 @@ VTDD v3 は ChatGPT thread を operational home として扱わない。durable 
 - GitHub: durable Issues、PRs、checks、branches、comments、queue records。
 - Passkey operator: high-risk approval boundary。
 - Custom GPT: optional conversational surface と migration compatibility。
+- Codex Security: optional external security reviewer signal。
 
 ## Initial Data Model
 
@@ -39,6 +40,14 @@ Execution record:
 - `/decisions`: merge / deploy / close / retry queue。
 - `/repositories/:owner/:repo/chats`: repository ごとの開発チャット一覧。
 - `/chats/:chatId`: execution / Issue / PR に紐づく開発チャット。
+
+## Reviewer Signals
+
+VTDD v3 は reviewer signal を GitHub truth と dashboard decision queue に集約する。
+
+Codex Security は optional external reviewer signal として扱う。VTDD runner 内に再実装せず、GitHub repository に接続された Codex Security の finding、validation summary、proposed patch、PR link を取り込む。
+
+Security finding は merge 前 blocker / warning として扱い、raw exploit details や sensitive validation logs は dashboard / RAG に保存しない。
 
 ## Samidare Backlog
 

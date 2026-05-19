@@ -42,6 +42,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - #15 runner auth mode / cost guard。
 - #16 chat / execution の realtime 更新。
 - #17 同一 repository 並行開発の conflict-aware scheduler。
+- #18 Codex Security reviewer signal。
 
 既存 Issue では以下も未完了のまま残る。
 
@@ -56,6 +57,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - Custom GPT は primary surface ではなく、必要なら optional entrance として残す。
 - VPS / local runner が通常の実行面になる。
 - 追加 OpenAI API 課金や Codex backend dependency は default にしない。
+- Codex Security は VTDD 内で再実装せず、GitHub repository に接続された external reviewer signal として取り込む。
 - mac Codex は emergency / bootstrap / auxiliary surface に寄せる。
 - chat は ChatGPT thread ではなく VTDD 側の durable work room として扱う。
 - 音声入力は即実行ではなく、確認可能な text intent に変換する。
