@@ -394,6 +394,7 @@ function renderDashboard({ executions, env, url }) {
   const cards = executions.map(renderExecutionCard).join("");
   const decisions = buildDecisionItems(executions).length;
   const notifications = buildNotifications(executions).length;
+  const repositorySummaries = buildRepositorySummaries(executions);
   return page({
     title: "VTDD v3 オーケストレーター",
     body: `
@@ -413,6 +414,13 @@ function renderDashboard({ executions, env, url }) {
           <a class="button" href="/notifications">通知</a>
           <a class="button" href="/api/executions">JSON</a>
         </div>
+      </section>
+      <section>
+        <div class="section-title">
+          <h2>リポジトリ別の進捗</h2>
+          <span>repo ごとの実行数 / 平均進捗 / 次の判断</span>
+        </div>
+        <div class="repo-grid">${repositorySummaries.map(renderRepositorySummary).join("")}</div>
       </section>
       <section>
         <div class="section-title">
@@ -437,6 +445,8 @@ function renderDashboard({ executions, env, url }) {
 }
 
 function renderProgress({ execution }) {
+  const repoUrl = repositoryUrl(execution.repository);
+  const issueUrl = issueUrlFor(execution);
   return page({
     title: `${execution.executionId} - VTDD progress`,
     body: `
@@ -444,7 +454,13 @@ function renderProgress({ execution }) {
         <p class="eyebrow">${escapeHtml(execution.repository)} #${escapeHtml(execution.issueNumber)}</p>
         <h1>${escapeHtml(execution.title)}</h1>
         <p>${escapeHtml(execution.currentStep)}</p>
-        <div class="actions hero-actions"><a class="button" href="/orchestrator">Dashboard</a><a class="button" href="/decisions">判断待ち</a></div>
+        <div class="actions hero-actions">
+          <a class="button" href="/orchestrator">Dashboard</a>
+          <a class="button" href="/decisions">判断待ち</a>
+          <a class="button" href="${escapeAttribute(repoUrl)}">Repository</a>
+          ${issueUrl ? `<a class="button" href="${escapeAttribute(issueUrl)}">Issue</a>` : ""}
+          ${execution.prUrl ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">PR</a>` : ""}
+        </div>
       </section>
       ${renderExecutionCard(execution, { expanded: true })}
     `
@@ -527,6 +543,8 @@ function renderDispatch({ url }) {
 
 function renderExecutionCard(execution, options = {}) {
   const progress = Math.max(0, Math.min(100, Number(execution.progress || 0)));
+  const repoUrl = repositoryUrl(execution.repository);
+  const issueUrl = issueUrlFor(execution);
   const pr = execution.prUrl
     ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">PR を開く</a>`
     : `<span class="muted">PR はまだありません</span>`;
@@ -555,6 +573,8 @@ function renderExecutionCard(execution, options = {}) {
       ${blocker}
       <div class="actions">
         <a class="button" href="${escapeAttribute(href)}">進捗</a>
+        <a class="button" href="${escapeAttribute(repoUrl)}">Repository</a>
+        ${issueUrl ? `<a class="button" href="${escapeAttribute(issueUrl)}">Issue</a>` : ""}
         ${pr}
       </div>
       ${options.expanded ? `<pre>${escapeHtml(JSON.stringify(execution, null, 2))}</pre>` : ""}
@@ -564,6 +584,33 @@ function renderExecutionCard(execution, options = {}) {
 
 function renderIssueRow(issue) {
   return `<a class="row-link" href="https://github.com/marushu/vtdd-v3/issues/${escapeAttribute(issue.number)}"><strong>#${escapeHtml(issue.number)}</strong><span>${escapeHtml(issue.title)}</span><em>${escapeHtml(issue.status)}</em></a>`;
+}
+
+function renderRepositorySummary(summary) {
+  const statusItems = Object.entries(summary.statusCounts)
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => `<span>${escapeHtml(displayStatus(status))}: ${escapeHtml(count)}</span>`)
+    .join("");
+  const latest = summary.latestExecution;
+  return `
+    <article class="card repo-card">
+      <div class="card-head">
+        <div>
+          <h3>${escapeHtml(summary.repository)}</h3>
+          <p>${escapeHtml(summary.executions.length)} 件の execution</p>
+        </div>
+        <span class="pill">${escapeHtml(summary.averageProgress)}%</span>
+      </div>
+      <div class="bar"><span style="width:${summary.averageProgress}%"></span></div>
+      <div class="meta compact">${statusItems}</div>
+      <p>${escapeHtml(latest.currentStep || "進捗なし")}</p>
+      <div class="actions">
+        <a class="button" href="${escapeAttribute(summary.repositoryUrl)}">Repository</a>
+        ${latest ? `<a class="button" href="/progress/${encodeURIComponent(latest.executionId)}">最新の進捗</a>` : ""}
+        ${summary.openPrUrl ? `<a class="button" href="${escapeAttribute(summary.openPrUrl)}">PR</a>` : ""}
+      </div>
+    </article>
+  `;
 }
 
 function renderDecisionItem(item) {
@@ -597,6 +644,36 @@ function buildNotifications(executions) {
       createdAt: new Date(Date.parse(execution.lastUpdatedAt || new Date()) + index).toISOString()
     }))
   );
+}
+
+function buildRepositorySummaries(executions) {
+  const grouped = new Map();
+  for (const execution of executions) {
+    const repository = normalizeText(execution.repository) || "unknown";
+    if (!grouped.has(repository)) grouped.set(repository, []);
+    grouped.get(repository).push(execution);
+  }
+
+  return [...grouped.entries()]
+    .map(([repository, repoExecutions]) => {
+      const sorted = [...repoExecutions].sort((a, b) => Date.parse(b.lastUpdatedAt || 0) - Date.parse(a.lastUpdatedAt || 0));
+      const averageProgress = Math.round(
+        repoExecutions.reduce((sum, execution) => sum + normalizeProgress(execution.progress), 0) / repoExecutions.length
+      );
+      return {
+        repository,
+        repositoryUrl: repositoryUrl(repository),
+        executions: repoExecutions,
+        latestExecution: sorted[0],
+        averageProgress,
+        openPrUrl: sorted.find((execution) => execution.prUrl)?.prUrl || null,
+        statusCounts: Object.fromEntries(allowedStatuses.map((status) => [
+          status,
+          repoExecutions.filter((execution) => execution.status === status).length
+        ]))
+      };
+    })
+    .sort((a, b) => Date.parse(b.latestExecution?.lastUpdatedAt || 0) - Date.parse(a.latestExecution?.lastUpdatedAt || 0));
 }
 
 function buildDispatchPreview({ body, origin }) {
@@ -809,6 +886,17 @@ function normalizeUrl(value, origin) {
   }
 }
 
+function repositoryUrl(repository) {
+  const text = normalizeText(repository);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(text)) return "https://github.com";
+  return `https://github.com/${text}`;
+}
+
+function issueUrlFor(execution) {
+  if (!execution.issueNumber) return null;
+  return `${repositoryUrl(execution.repository)}/issues/${encodeURIComponent(execution.issueNumber)}`;
+}
+
 function authorityForNextAction(action) {
   if (action === "issue_close_review" || action === "merge_review" || action === "deploy_review") {
     return "GO + real passkey";
@@ -874,14 +962,17 @@ function page({ title, body }) {
     h2, h3, p { margin-top:0; }
     .hero p:not(.eyebrow) { max-width:760px; color:#4c5b55; font-size:16px; line-height:1.6; margin:12px 0 0; }
     .meta, .actions, .card-head, .section-title { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .meta.compact { margin:10px 0 12px; }
     .hero-actions { margin-top:18px; }
     .meta span { border:1px solid #cbd5cc; border-radius:999px; padding:6px 10px; color:#52635b; font-size:13px; }
     .section-title { justify-content:space-between; margin:28px 0 12px; }
     .section-title span, .muted { color:#64736c; font-size:14px; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px; }
+    .repo-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px; }
     .stack { display:grid; gap:12px; }
     .card, .notice { background:#fff; border:1px solid #dce3dc; border-radius:8px; padding:16px; box-shadow:0 8px 22px rgba(30, 44, 36, .06); }
     .wide { max-width:780px; }
+    .repo-card { border-left:4px solid #2e7359; }
     .card-head { justify-content:space-between; align-items:flex-start; }
     .card h3 { margin:0 0 4px; font-size:17px; }
     .card p { color:#4d5b56; line-height:1.5; }

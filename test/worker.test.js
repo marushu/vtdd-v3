@@ -36,6 +36,10 @@ test("orchestrator dashboard renders execution cards", async () => {
   assert.equal(html.includes("remote-codex-issue426-1f5bdj"), true);
   assert.equal(html.includes("PR を開く"), true);
   assert.equal(html.includes("進行中の開発"), true);
+  assert.equal(html.includes("リポジトリ別の進捗"), true);
+  assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p"), true);
+  assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p/issues/426"), true);
+  assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p/pull/425"), true);
   assert.equal(html.includes("判断待ち"), true);
   assert.equal(html.includes("通知"), true);
   assert.equal(html.includes("v3 Issues"), true);
@@ -50,6 +54,8 @@ test("progress page is addressable by executionId", async () => {
   const html = await response.text();
   assert.equal(html.includes("Butler 初動応答の高速化"), true);
   assert.equal(html.includes("ファイル編集中"), true);
+  assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p"), true);
+  assert.equal(html.includes("https://github.com/marushu/vtdd-v2-p/issues/426"), true);
 });
 
 test("execution list API returns durable JSON shape", async () => {
