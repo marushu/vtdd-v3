@@ -1029,9 +1029,19 @@ async function verifyPasskeyRegistrationForRuntime({ env, body }) {
     return { ok: false, error: "passkey_registration_verify_failed", statusCode: 400 };
   }
   const credential = verification.registrationInfo.credential;
+  const credentialId = passkeyCredentialValueToBase64Url(credential.id || body.response?.rawId);
+  const publicKey = passkeyCredentialValueToBase64Url(credential.publicKey);
+  if (!credentialId || !publicKey) {
+    return {
+      ok: false,
+      error: "passkey_registration_missing_credential",
+      reason: "passkey registration succeeded, but credential id/public key could not be stored.",
+      statusCode: 400
+    };
+  }
   const passkey = {
-    credentialId: bytesToBase64Url(credential.id),
-    publicKey: bytesToBase64Url(credential.publicKey),
+    credentialId,
+    publicKey,
     counter: credential.counter,
     transports: body.response?.response?.transports || [],
     createdAt: new Date().toISOString()
@@ -3842,6 +3852,19 @@ function bytesToBase64Url(value) {
     binary += String.fromCharCode(byte);
   });
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+export function passkeyCredentialValueToBase64Url(value) {
+  if (typeof value === "string") {
+    return normalizeText(value);
+  }
+  if (value instanceof ArrayBuffer || value instanceof Uint8Array) {
+    return bytesToBase64Url(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return bytesToBase64Url(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+  }
+  return "";
 }
 
 function base64UrlToBytes(value) {
