@@ -69,7 +69,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - 音声入力は即実行ではなく、確認可能な text intent に変換する。
 - マイクモード中は可能なら Screen Wake Lock で自動ロックを抑止し、解除 / 未対応を owner に見える状態にする。
 - 高リスク intent は音声だけで通さず、短い evidence と scope を表示した GO + passkey ボタンに流す。
-- Butler は初期 persona `head_butler_elder_calm` とし、初回に owner 呼称を確認してから保存する。
+- Butler は初期 persona `head_butler_elder_calm` とし、端末の speech synthesis で可能な範囲の落ち着いた音声出力を使い、初回に owner 呼称を確認してから保存する。
 - RAG は full transcript ではなく summary / decision / unresolved / evidence を優先する。
 
 ## 安全境界
