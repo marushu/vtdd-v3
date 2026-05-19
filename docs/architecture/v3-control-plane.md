@@ -98,6 +98,10 @@ read-only dashboard operation は GO 不要。
 - generated PR body discipline
 - runtime truth over memory
 
+v2 / v3 境界は [v2-v3-separation.md](./v2-v3-separation.md) を canonical とする。
+v2 Worker は legacy approval provider としてだけ残し、v3 deploy workflow / dashboard の
+default 操作面としては使わない。
+
 ## Cost Boundary
 
 VTDD v3 は追加 OpenAI API 課金や Codex backend dependency を default にしない。
