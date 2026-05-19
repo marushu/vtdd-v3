@@ -12,6 +12,7 @@ workflow を v3 の通常操作面として使わない。
 
 - Cloudflare dashboard / repository hub / chat / notification / execution monitor。
 - v3 Worker `vtdd-v3-orchestrator` の deploy workflow。
+- v3 Worker origin の passkey operator URL。
 - GitHub Actions deploy run の監視と dashboard execution への同期。
 - VPS runner queue / claim / event ingestion。
 
@@ -27,6 +28,7 @@ workflow を v3 の通常操作面として使わない。
 - v2 repository の `deploy-production.yml` で v3 Worker を deploy しない。
 - v3 用 `approvalGrant` を v2 repository scope として検証しない。
 - v3 dashboard の deploy monitor default を v2 workflow repository にしない。
+- v3 deploy 用 passkey URL として v2 Worker origin を案内しない。
 - approval grant id、token、secret を v3 chat / notification / RAG に保存しない。
 
 ## 削除判断

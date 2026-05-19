@@ -229,6 +229,10 @@ export default {
       return html(renderDeployMonitor({ url }));
     }
 
+    if (url.pathname === "/approval/passkey/operator") {
+      return html(renderV3PasskeyOperator({ url }));
+    }
+
     if (url.pathname === "/butler") {
       return html(renderButler({ url }));
     }
@@ -291,6 +295,17 @@ export default {
       }
       await saveExecutions(env, executions);
       return json(result, result.execution.createdFromEvent ? 201 : 200);
+    }
+
+    if (url.pathname === "/api/approval/passkey/status") {
+      return json({
+        ok: true,
+        provider: "vtdd-v3",
+        status: "operator_shell_only",
+        passkeyRuntimeImplemented: false,
+        legacyProviderUrl: null,
+        reason: "v3 same-origin passkey approval runtime is not implemented yet; do not use v2 approval URLs for v3 deploy."
+      });
     }
 
     if (url.pathname === "/api/chats" && request.method === "GET") {
@@ -1491,6 +1506,7 @@ function renderDeployMonitor({ url }) {
         <div class="actions hero-actions">
           <a class="button" href="/orchestrator">Dashboard</a>
           <a class="button" href="/notifications">通知</a>
+          <a class="button" href="/approval/passkey/operator?repositoryInput=marushu%2Fvtdd-v3&phase=execution&actionType=deploy_production&highRiskKind=deploy_production&issueNumber=6">v3 passkey operator</a>
           <a class="button" href="/api/github/deploy-runs?targetRepository=marushu%2Fvtdd-v3&workflowRepository=marushu%2Fvtdd-v3&workflow=deploy-production.yml&limit=5">最新 run JSON</a>
         </div>
       </section>
@@ -1527,6 +1543,52 @@ function renderDeployMonitor({ url }) {
           });
         })();
       </script>
+    `
+  });
+}
+
+function renderV3PasskeyOperator({ url }) {
+  const repositoryInput = normalizeRepositoryInput(url.searchParams.get("repositoryInput")) || "marushu/vtdd-v3";
+  const actionType = normalizeText(url.searchParams.get("actionType")) || "deploy_production";
+  const highRiskKind = normalizeText(url.searchParams.get("highRiskKind")) || actionType;
+  const phase = normalizeText(url.searchParams.get("phase")) || "execution";
+  const issueNumber = normalizeIssueNumber(url.searchParams.get("issueNumber"));
+  const approvalGrantPlaceholder = `v3-approval-pending:${repositoryInput}:${actionType}`;
+  return page({
+    title: "VTDD v3 Passkey Operator",
+    body: `
+      <section class="hero">
+        <p class="eyebrow">same-origin high-risk approval</p>
+        <h1>v3 passkey operator</h1>
+        <p>v3 の高リスク操作はこの v3 Worker origin で承認します。v2 URL へ誘導しません。</p>
+        <div class="actions hero-actions">
+          <a class="button" href="/orchestrator">Dashboard</a>
+          <a class="button" href="/deploys">Deploy run</a>
+          <a class="button" href="/api/approval/passkey/status">Status JSON</a>
+        </div>
+      </section>
+      <section class="card wide">
+        <h2>Approval scope</h2>
+        <dl>
+          <div><dt>repository</dt><dd>${escapeHtml(repositoryInput)}</dd></div>
+          <div><dt>actionType</dt><dd>${escapeHtml(actionType)}</dd></div>
+          <div><dt>highRiskKind</dt><dd>${escapeHtml(highRiskKind)}</dd></div>
+          <div><dt>phase</dt><dd>${escapeHtml(phase)}</dd></div>
+          <div><dt>Issue</dt><dd>${escapeHtml(issueNumber || "なし")}</dd></div>
+        </dl>
+      </section>
+      <section class="notice">
+        <h2>未実装のため停止</h2>
+        <p>v3 same-origin passkey approval runtime はまだ実装途中です。この画面は v3 URL を出すための operator shell であり、real approvalGrantId はまだ発行しません。</p>
+        <p>v2 の passkey operator URL で v3 deploy を承認すると、v2 / v3 の責務が混線します。ここでは deploy を進めず、v3 approval runtime の実装を先に進めます。</p>
+        <pre>${escapeHtml(JSON.stringify({
+          ok: false,
+          status: "operator_shell_only",
+          approvalGrantId: approvalGrantPlaceholder,
+          usableForDeploy: false,
+          next: "Implement v3 passkey registration / approval / retrieval before production deploy."
+        }, null, 2))}</pre>
+      </section>
     `
   });
 }

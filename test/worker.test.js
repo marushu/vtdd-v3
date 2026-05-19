@@ -196,6 +196,28 @@ test("v3 deploy workflow and approval validation keep v2/v3 scopes separate", as
   assert.equal(wrongScope.issues.includes("approvalGrant scope.repositoryInput must match target repo"), true);
 });
 
+test("v3 passkey operator URL is same-origin and does not point to v2", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/approval/passkey/operator?repositoryInput=marushu%2Fvtdd-v3&phase=execution&actionType=deploy_production&highRiskKind=deploy_production&issueNumber=6"),
+    { VTDD_V3_MODE: "test" }
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.equal(html.includes("v3 passkey operator"), true);
+  assert.equal(html.includes("marushu/vtdd-v3"), true);
+  assert.equal(html.includes("deploy_production"), true);
+  assert.equal(html.includes("operator_shell_only"), true);
+  assert.equal(html.includes("vtdd-v2-mvp.polished-tree-da7c.workers.dev"), false);
+
+  const status = await worker.fetch(new Request("https://example.com/api/approval/passkey/status"), {
+    VTDD_V3_MODE: "test"
+  });
+  assert.equal(status.status, 200);
+  const body = await status.json();
+  assert.equal(body.provider, "vtdd-v3");
+  assert.equal(body.passkeyRuntimeImplemented, false);
+});
+
 test("notification settings default to all events and can filter known event types", async () => {
   const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
   const settingsPage = await worker.fetch(new Request("https://example.com/notifications/settings"), env);
