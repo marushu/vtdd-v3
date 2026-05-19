@@ -459,7 +459,7 @@ function renderProgress({ execution }) {
           <a class="button" href="/decisions">判断待ち</a>
           <a class="button" href="${escapeAttribute(repoUrl)}">Repository</a>
           ${issueUrl ? `<a class="button" href="${escapeAttribute(issueUrl)}">Issue</a>` : ""}
-          ${execution.prUrl ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">PR</a>` : ""}
+          ${execution.prUrl ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">${escapeHtml(linkLabelForPrUrl(execution.prUrl))}</a>` : ""}
         </div>
       </section>
       ${renderExecutionCard(execution, { expanded: true })}
@@ -546,7 +546,7 @@ function renderExecutionCard(execution, options = {}) {
   const repoUrl = repositoryUrl(execution.repository);
   const issueUrl = issueUrlFor(execution);
   const pr = execution.prUrl
-    ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">PR を開く</a>`
+    ? `<a class="button" href="${escapeAttribute(execution.prUrl)}">${escapeHtml(linkLabelForPrUrl(execution.prUrl))}</a>`
     : `<span class="muted">PR はまだありません</span>`;
   const blocker = execution.blocker
     ? `<p class="blocker">Blocker: ${escapeHtml(execution.blocker)}</p>`
@@ -666,7 +666,7 @@ function buildRepositorySummaries(executions) {
         executions: repoExecutions,
         latestExecution: sorted[0],
         averageProgress,
-        openPrUrl: sorted.find((execution) => execution.prUrl)?.prUrl || null,
+        openPrUrl: sorted.find((execution) => isPullRequestUrl(execution.prUrl))?.prUrl || null,
         statusCounts: Object.fromEntries(allowedStatuses.map((status) => [
           status,
           repoExecutions.filter((execution) => execution.status === status).length
@@ -895,6 +895,14 @@ function repositoryUrl(repository) {
 function issueUrlFor(execution) {
   if (!execution.issueNumber) return null;
   return `${repositoryUrl(execution.repository)}/issues/${encodeURIComponent(execution.issueNumber)}`;
+}
+
+function isPullRequestUrl(value) {
+  return /\/pull\/\d+\/?$/.test(normalizeText(value));
+}
+
+function linkLabelForPrUrl(value) {
+  return isPullRequestUrl(value) ? "PR を開く" : "関連リンク";
 }
 
 function authorityForNextAction(action) {
