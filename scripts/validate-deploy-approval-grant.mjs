@@ -14,17 +14,12 @@ async function main() {
   if (!repositoryInput) {
     throw new Error("--repository or GITHUB_REPOSITORY is required");
   }
-  if (!bearerToken) {
-    throw new Error("--gateway-bearer-token or VTDD_GATEWAY_BEARER_TOKEN is required");
-  }
-
-  const endpoint = new URL("/v2/retrieve/approval-grant", runtimeUrl);
+  const endpoint = new URL("/retrieve/approval-grant", runtimeUrl);
   endpoint.searchParams.set("approvalId", approvalGrantId);
 
+  const headers = bearerToken ? { authorization: `Bearer ${bearerToken}` } : {};
   const response = await fetch(endpoint, {
-    headers: {
-      authorization: `Bearer ${bearerToken}`
-    }
+    headers
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {

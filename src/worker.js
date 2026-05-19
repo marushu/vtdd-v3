@@ -1,6 +1,18 @@
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse
+} from "@simplewebauthn/server";
+
 const EXECUTION_STORE_KEY = "vtdd:v3:executions";
 const CHAT_STORE_KEY = "vtdd:v3:chats";
 const NOTIFICATION_SETTINGS_KEY = "vtdd:v3:notification-settings";
+const PASSKEY_STORE_KEY = "vtdd:v3:passkeys";
+const PASSKEY_SESSION_PREFIX = "vtdd:v3:passkey-session:";
+const PASSKEY_GRANT_PREFIX = "vtdd:v3:approval-grant:";
+const PASSKEY_SESSION_TTL_MS = 5 * 60 * 1000;
+const PASSKEY_GRANT_TTL_MS = 2 * 60 * 1000;
 
 const allowedPhases = [
   "queued",
@@ -298,14 +310,44 @@ export default {
     }
 
     if (url.pathname === "/api/approval/passkey/status") {
+      const passkeys = await listPasskeys(env);
       return json({
         ok: true,
         provider: "vtdd-v3",
-        status: "operator_shell_only",
-        passkeyRuntimeImplemented: false,
-        legacyProviderUrl: null,
-        reason: "v3 same-origin passkey approval runtime is not implemented yet; do not use v2 approval URLs for v3 deploy."
+        status: "ready",
+        passkeyRuntimeImplemented: true,
+        registeredPasskeys: passkeys.length,
+        legacyProviderUrl: null
       });
+    }
+
+    if (url.pathname === "/api/approval/passkey/register/options" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = await createPasskeyRegistrationOptions({ env, url, body });
+      return json(result, result.ok ? 201 : result.statusCode || 400);
+    }
+
+    if (url.pathname === "/api/approval/passkey/register/verify" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = await verifyPasskeyRegistrationForRuntime({ env, url, body });
+      return json(result, result.ok ? 201 : result.statusCode || 400);
+    }
+
+    if (url.pathname === "/api/approval/passkey/challenge" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = await createPasskeyApprovalChallenge({ env, url, body });
+      return json(result, result.ok ? 201 : result.statusCode || 400);
+    }
+
+    if (url.pathname === "/api/approval/passkey/verify" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = await verifyPasskeyApprovalForRuntime({ env, url, body });
+      return json(result, result.ok ? 201 : result.statusCode || 400);
+    }
+
+    if (url.pathname === "/retrieve/approval-grant" || url.pathname === "/api/approval/retrieve") {
+      const result = await retrieveApprovalGrant({ env, url });
+      return json(result, result.ok ? 200 : result.statusCode || 400);
     }
 
     if (url.pathname === "/api/chats" && request.method === "GET") {
@@ -546,6 +588,231 @@ async function saveNotificationSettings(env, settings) {
   if (!store?.put) return false;
   await store.put(NOTIFICATION_SETTINGS_KEY, JSON.stringify(normalizeNotificationSettings(settings)));
   return true;
+}
+
+async function listPasskeys(env) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) return [];
+  const raw = await store.get(PASSKEY_STORE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.credentialId && item?.publicKey) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function savePasskeys(env, passkeys) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(PASSKEY_STORE_KEY, JSON.stringify(passkeys));
+  return true;
+}
+
+async function storePasskeySession(env, session) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(`${PASSKEY_SESSION_PREFIX}${session.sessionId}`, JSON.stringify(session), {
+    expirationTtl: Math.ceil(PASSKEY_SESSION_TTL_MS / 1000)
+  });
+  return true;
+}
+
+async function getPasskeySession(env, sessionId) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) return null;
+  const raw = await store.get(`${PASSKEY_SESSION_PREFIX}${sessionId}`);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Date.parse(parsed.expiresAt) <= Date.now()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function storeApprovalGrant(env, approvalGrant) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(`${PASSKEY_GRANT_PREFIX}${approvalGrant.approvalId}`, JSON.stringify(approvalGrant), {
+    expirationTtl: Math.ceil(PASSKEY_GRANT_TTL_MS / 1000)
+  });
+  return true;
+}
+
+async function retrieveApprovalGrant({ env, url }) {
+  const approvalId = normalizeText(url.searchParams.get("approvalId") || url.searchParams.get("approvalGrantId"));
+  if (!approvalId) {
+    return { ok: false, error: "approval_id_required", statusCode: 400 };
+  }
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) {
+    return { ok: false, error: "approval_store_unavailable", statusCode: 503 };
+  }
+  const raw = await store.get(`${PASSKEY_GRANT_PREFIX}${approvalId}`);
+  if (!raw) {
+    return { ok: false, error: "approval_grant_not_found", statusCode: 404 };
+  }
+  const approvalGrant = JSON.parse(raw);
+  if (Date.parse(approvalGrant.expiresAt) <= Date.now()) {
+    return { ok: false, error: "approval_grant_expired", reason: "approval grant is expired. v3 Worker origin で再承認してください。", statusCode: 410 };
+  }
+  return { ok: true, approvalGrant };
+}
+
+async function createPasskeyRegistrationOptions({ env, url, body }) {
+  if (!env?.EXECUTION_STORE) {
+    return { ok: false, error: "approval_store_unavailable", statusCode: 503 };
+  }
+  const rpID = url.hostname;
+  const origin = url.origin;
+  const operatorId = normalizeText(body.operatorId) || "vtdd-v3-owner";
+  const operatorLabel = normalizeText(body.operatorLabel) || "VTDD v3 Owner";
+  const sessionId = randomId("passkey-reg");
+  const options = await generateRegistrationOptions({
+    rpName: "VTDD v3",
+    rpID,
+    userID: textToBytes(sessionId),
+    userName: operatorId,
+    userDisplayName: operatorLabel,
+    timeout: PASSKEY_SESSION_TTL_MS,
+    attestationType: "none",
+    authenticatorSelection: {
+      residentKey: "required",
+      userVerification: "required"
+    }
+  });
+  const session = {
+    sessionId,
+    kind: "passkey_registration",
+    challenge: options.challenge,
+    rpID,
+    origin,
+    expiresAt: new Date(Date.now() + PASSKEY_SESSION_TTL_MS).toISOString()
+  };
+  await storePasskeySession(env, session);
+  return { ok: true, sessionId, options };
+}
+
+async function verifyPasskeyRegistrationForRuntime({ env, body }) {
+  const sessionId = normalizeText(body.sessionId);
+  const session = await getPasskeySession(env, sessionId);
+  if (!session || session.kind !== "passkey_registration") {
+    return { ok: false, error: "passkey_session_not_found", statusCode: 404 };
+  }
+  const verification = await verifyRegistrationResponse({
+    response: body.response,
+    expectedChallenge: session.challenge,
+    expectedOrigin: session.origin,
+    expectedRPID: session.rpID,
+    requireUserVerification: true
+  });
+  if (!verification.verified || !verification.registrationInfo) {
+    return { ok: false, error: "passkey_registration_verify_failed", statusCode: 400 };
+  }
+  const credential = verification.registrationInfo.credential;
+  const passkey = {
+    credentialId: bytesToBase64Url(credential.id),
+    publicKey: bytesToBase64Url(credential.publicKey),
+    counter: credential.counter,
+    transports: body.response?.response?.transports || [],
+    createdAt: new Date().toISOString()
+  };
+  const passkeys = (await listPasskeys(env)).filter((item) => item.credentialId !== passkey.credentialId);
+  passkeys.unshift(passkey);
+  await savePasskeys(env, passkeys);
+  return {
+    ok: true,
+    registered: true,
+    credentialId: passkey.credentialId,
+    registeredPasskeys: passkeys.length
+  };
+}
+
+async function createPasskeyApprovalChallenge({ env, url, body }) {
+  if (!env?.EXECUTION_STORE) {
+    return { ok: false, error: "approval_store_unavailable", statusCode: 503 };
+  }
+  const passkeys = await listPasskeys(env);
+  if (passkeys.length === 0) {
+    return { ok: false, error: "passkey_not_registered", reason: "v3 origin に passkey を先に登録してください。", statusCode: 409 };
+  }
+  const scope = normalizeApprovalScope(body.scope || body);
+  const sessionId = randomId("passkey-auth");
+  const options = await generateAuthenticationOptions({
+    rpID: url.hostname,
+    timeout: PASSKEY_SESSION_TTL_MS,
+    userVerification: "required",
+    allowCredentials: passkeys.map((passkey) => ({
+      id: passkey.credentialId,
+      transports: Array.isArray(passkey.transports) ? passkey.transports : []
+    }))
+  });
+  const session = {
+    sessionId,
+    kind: "passkey_approval",
+    challenge: options.challenge,
+    rpID: url.hostname,
+    origin: url.origin,
+    scope,
+    expiresAt: new Date(Date.now() + PASSKEY_SESSION_TTL_MS).toISOString()
+  };
+  await storePasskeySession(env, session);
+  return { ok: true, sessionId, scope, options };
+}
+
+async function verifyPasskeyApprovalForRuntime({ env, body }) {
+  const sessionId = normalizeText(body.sessionId);
+  const session = await getPasskeySession(env, sessionId);
+  if (!session || session.kind !== "passkey_approval") {
+    return { ok: false, error: "passkey_session_not_found", statusCode: 404 };
+  }
+  const credentialId = normalizeText(body.response?.id);
+  const passkeys = await listPasskeys(env);
+  const passkey = passkeys.find((item) => item.credentialId === credentialId);
+  if (!passkey) {
+    return { ok: false, error: "matching_registered_passkey_not_found", statusCode: 404 };
+  }
+  const verification = await verifyAuthenticationResponse({
+    response: body.response,
+    expectedChallenge: session.challenge,
+    expectedOrigin: session.origin,
+    expectedRPID: session.rpID,
+    credential: {
+      id: passkey.credentialId,
+      publicKey: base64UrlToBytes(passkey.publicKey),
+      counter: Number(passkey.counter || 0),
+      transports: Array.isArray(passkey.transports) ? passkey.transports : []
+    },
+    requireUserVerification: true
+  });
+  if (!verification.verified) {
+    return { ok: false, error: "passkey_approval_verify_failed", statusCode: 400 };
+  }
+  passkey.counter = verification.authenticationInfo?.newCounter ?? passkey.counter;
+  await savePasskeys(env, passkeys);
+  const approvalGrant = {
+    approvalId: randomId("approval"),
+    verified: true,
+    expiresAt: new Date(Date.now() + PASSKEY_GRANT_TTL_MS).toISOString(),
+    scope: session.scope
+  };
+  await storeApprovalGrant(env, approvalGrant);
+  return { ok: true, approvalGrant, approvalGrantId: approvalGrant.approvalId };
+}
+
+function normalizeApprovalScope(scope = {}) {
+  return {
+    actionType: normalizeText(scope.actionType),
+    highRiskKind: normalizeText(scope.highRiskKind),
+    repositoryInput: normalizeRepositoryInput(scope.repositoryInput || scope.repository),
+    issueNumber: normalizeText(scope.issueNumber),
+    pullNumber: normalizeText(scope.pullNumber),
+    relatedIssue: normalizeText(scope.relatedIssue),
+    phase: normalizeText(scope.phase)
+  };
 }
 
 async function fetchGithubDeployRuns({ env, url }) {
@@ -1553,7 +1820,7 @@ function renderV3PasskeyOperator({ url }) {
   const highRiskKind = normalizeText(url.searchParams.get("highRiskKind")) || actionType;
   const phase = normalizeText(url.searchParams.get("phase")) || "execution";
   const issueNumber = normalizeIssueNumber(url.searchParams.get("issueNumber"));
-  const approvalGrantPlaceholder = `v3-approval-pending:${repositoryInput}:${actionType}`;
+  const scope = { actionType, highRiskKind, repositoryInput, issueNumber: issueNumber || "", phase };
   return page({
     title: "VTDD v3 Passkey Operator",
     body: `
@@ -1577,18 +1844,102 @@ function renderV3PasskeyOperator({ url }) {
           <div><dt>Issue</dt><dd>${escapeHtml(issueNumber || "なし")}</dd></div>
         </dl>
       </section>
-      <section class="notice">
-        <h2>未実装のため停止</h2>
-        <p>v3 same-origin passkey approval runtime はまだ実装途中です。この画面は v3 URL を出すための operator shell であり、real approvalGrantId はまだ発行しません。</p>
-        <p>v2 の passkey operator URL で v3 deploy を承認すると、v2 / v3 の責務が混線します。ここでは deploy を進めず、v3 approval runtime の実装を先に進めます。</p>
-        <pre>${escapeHtml(JSON.stringify({
-          ok: false,
-          status: "operator_shell_only",
-          approvalGrantId: approvalGrantPlaceholder,
-          usableForDeploy: false,
-          next: "Implement v3 passkey registration / approval / retrieval before production deploy."
-        }, null, 2))}</pre>
+      <section class="card wide">
+        <h2>Passkey</h2>
+        <div class="actions">
+          <button class="button" type="button" id="register-passkey">この端末の passkey を登録</button>
+          <button class="button primary" type="button" id="approve-passkey">GO + passkey 承認</button>
+        </div>
+        <p class="muted">承認は短命で、この scope だけに使えます。grant は secret ではありませんが、chat / RAG には保存しません。</p>
+        <pre id="passkey-output">${escapeHtml(JSON.stringify({ ok: true, status: "ready", scope }, null, 2))}</pre>
       </section>
+      <script>
+        (() => {
+          const output = document.getElementById("passkey-output");
+          const scope = ${JSON.stringify(scope)};
+          const show = (value) => { output.textContent = JSON.stringify(value, null, 2); };
+          const post = async (path, body) => {
+            const response = await fetch(path, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (!response.ok) throw data;
+            return data;
+          };
+          const b64ToBuffer = (value) => {
+            const base64 = String(value).replace(/-/g, "+").replace(/_/g, "/");
+            const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+            const binary = atob(padded);
+            const bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+            return bytes.buffer;
+          };
+          const bufferToB64 = (buffer) => {
+            const bytes = new Uint8Array(buffer);
+            let binary = "";
+            bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+            return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+          };
+          const credentialToJSON = (credential) => {
+            const response = {};
+            ["clientDataJSON", "attestationObject", "authenticatorData", "signature", "userHandle"].forEach((key) => {
+              const value = credential.response[key];
+              if (value instanceof ArrayBuffer) response[key] = bufferToB64(value);
+            });
+            if (typeof credential.response.getTransports === "function") {
+              response.transports = credential.response.getTransports();
+            }
+            return {
+              id: credential.id,
+              rawId: bufferToB64(credential.rawId),
+              type: credential.type,
+              response,
+              clientExtensionResults: credential.getClientExtensionResults?.() || {}
+            };
+          };
+          const registrationOptionsToPublicKey = (options) => ({
+            ...options,
+            challenge: b64ToBuffer(options.challenge),
+            user: { ...options.user, id: b64ToBuffer(options.user.id) },
+            excludeCredentials: (options.excludeCredentials || []).map((item) => ({ ...item, id: b64ToBuffer(item.id) }))
+          });
+          const authenticationOptionsToPublicKey = (options) => ({
+            ...options,
+            challenge: b64ToBuffer(options.challenge),
+            allowCredentials: (options.allowCredentials || []).map((item) => ({ ...item, id: b64ToBuffer(item.id) }))
+          });
+          document.getElementById("register-passkey").addEventListener("click", async () => {
+            try {
+              show({ status: "creating_registration_options" });
+              const options = await post("/api/approval/passkey/register/options", { operatorId: "vtdd-v3-owner", operatorLabel: "VTDD v3 Owner" });
+              const credential = await navigator.credentials.create({ publicKey: registrationOptionsToPublicKey(options.options) });
+              const verified = await post("/api/approval/passkey/register/verify", {
+                sessionId: options.sessionId,
+                response: credentialToJSON(credential)
+              });
+              show(verified);
+            } catch (error) {
+              show({ ok: false, error });
+            }
+          });
+          document.getElementById("approve-passkey").addEventListener("click", async () => {
+            try {
+              show({ status: "creating_approval_challenge", scope });
+              const options = await post("/api/approval/passkey/challenge", { scope });
+              const credential = await navigator.credentials.get({ publicKey: authenticationOptionsToPublicKey(options.options) });
+              const verified = await post("/api/approval/passkey/verify", {
+                sessionId: options.sessionId,
+                response: credentialToJSON(credential)
+              });
+              show(verified);
+            } catch (error) {
+              show({ ok: false, error });
+            }
+          });
+        })();
+      </script>
     `
   });
 }
@@ -2583,6 +2934,34 @@ function formatDate(value) {
 
 function normalizeText(value) {
   return String(value ?? "").trim();
+}
+
+function randomId(prefix) {
+  return `${prefix}:${crypto.randomUUID()}`;
+}
+
+function textToBytes(value) {
+  return new TextEncoder().encode(normalizeText(value));
+}
+
+function bytesToBase64Url(value) {
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBytes(value) {
+  const base64 = normalizeText(value).replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function escapeHtml(value) {

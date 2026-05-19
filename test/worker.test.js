@@ -178,7 +178,8 @@ test("v3 deploy workflow and approval validation keep v2/v3 scopes separate", as
   assert.equal(workflow.includes("target_repository must match this v3 repository."), true);
   assert.equal(workflow.includes("--repository \"${{ github.event.inputs.target_repository }}\""), true);
   assert.equal(workflow.includes("wrangler-action@v4"), true);
-  assert.equal(separationDoc.includes("legacy approval provider"), true);
+  assert.equal(workflow.includes("VTDD_GATEWAY_BEARER_TOKEN"), false);
+  assert.equal(separationDoc.includes("v3 は passkey approval runtime を自前で持つ"), true);
   assert.equal(separationDoc.includes("v2 repository の `deploy-production.yml` で v3 Worker を deploy しない"), true);
 
   const approvalGrant = {
@@ -196,26 +197,63 @@ test("v3 deploy workflow and approval validation keep v2/v3 scopes separate", as
   assert.equal(wrongScope.issues.includes("approvalGrant scope.repositoryInput must match target repo"), true);
 });
 
-test("v3 passkey operator URL is same-origin and does not point to v2", async () => {
+test("v3 passkey operator URL is same-origin and exposes real runtime endpoints", async () => {
   const response = await worker.fetch(
     new Request("https://example.com/approval/passkey/operator?repositoryInput=marushu%2Fvtdd-v3&phase=execution&actionType=deploy_production&highRiskKind=deploy_production&issueNumber=6"),
-    { VTDD_V3_MODE: "test" }
+    { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() }
   );
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.equal(html.includes("v3 passkey operator"), true);
   assert.equal(html.includes("marushu/vtdd-v3"), true);
   assert.equal(html.includes("deploy_production"), true);
-  assert.equal(html.includes("operator_shell_only"), true);
+  assert.equal(html.includes("GO + passkey 承認"), true);
+  assert.equal(html.includes("/api/approval/passkey/register/options"), true);
   assert.equal(html.includes("vtdd-v2-mvp.polished-tree-da7c.workers.dev"), false);
 
   const status = await worker.fetch(new Request("https://example.com/api/approval/passkey/status"), {
-    VTDD_V3_MODE: "test"
+    VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore()
   });
   assert.equal(status.status, 200);
   const body = await status.json();
   assert.equal(body.provider, "vtdd-v3");
-  assert.equal(body.passkeyRuntimeImplemented, false);
+  assert.equal(body.passkeyRuntimeImplemented, true);
+});
+
+test("v3 passkey runtime creates registration options and blocks approval before registration", async () => {
+  const env = { VTDD_V3_MODE: "test", EXECUTION_STORE: createMemoryStore() };
+  const registration = await worker.fetch(
+    new Request("https://example.com/api/approval/passkey/register/options", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operatorId: "owner", operatorLabel: "Owner" })
+    }),
+    env
+  );
+  assert.equal(registration.status, 201);
+  const registrationBody = await registration.json();
+  assert.equal(registrationBody.ok, true);
+  assert.equal(registrationBody.options.rp.id, "example.com");
+  assert.equal(registrationBody.options.rp.name, "VTDD v3");
+  assert.equal(typeof registrationBody.sessionId, "string");
+
+  const approval = await worker.fetch(
+    new Request("https://example.com/api/approval/passkey/challenge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        scope: {
+          actionType: "deploy_production",
+          highRiskKind: "deploy_production",
+          repositoryInput: "marushu/vtdd-v3",
+          phase: "execution"
+        }
+      })
+    }),
+    env
+  );
+  assert.equal(approval.status, 409);
+  assert.equal((await approval.json()).error, "passkey_not_registered");
 });
 
 test("notification settings default to all events and can filter known event types", async () => {

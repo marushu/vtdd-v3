@@ -4,9 +4,8 @@
 
 VTDD の主系は v3 dashboard / orchestrator に移す。
 
-v2 Worker / operator は、v3 が passkey approval runtime を自前実装するまでの
-legacy approval provider としてだけ残す。v2 の dashboard / Custom GPT / deploy
-workflow を v3 の通常操作面として使わない。
+v2 Worker / operator は、v3 deploy や v3 dashboard の通常操作面として使わない。
+v3 は passkey approval runtime を自前で持つ。
 
 ## v3 の責務
 
@@ -18,10 +17,10 @@ workflow を v3 の通常操作面として使わない。
 
 ## v2 に一時的に残す責務
 
-- same-origin WebAuthn / passkey approval grant 発行。
-- `/v2/retrieve/approval-grant` による短命 approval grant retrieval。
+- historical reference / rollback evidence。
+- v2 自身の過去 runtime truth。
 
-この legacy dependency は v3 に passkey approval runtime を移植したら削除候補にする。
+v3 deploy の approval provider としては使わない。
 
 ## 禁止する混線
 
@@ -35,7 +34,6 @@ workflow を v3 の通常操作面として使わない。
 
 v2 Worker / Cloudflare resources の削除は以下が満たされてから行う。
 
-- v3 が passkey registration / approval / retrieval を自前で持つ。
 - v3 deploy workflow が GO + passkey で成功済み。
 - v3 dashboard が deploy run success / failure を拾える。
 - v2 にしかない operator capability が残っていない。
