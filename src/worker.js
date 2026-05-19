@@ -4,9 +4,11 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse
 } from "@simplewebauthn/server";
+import { staticAssets } from "./static-assets.generated.js";
 
 const EXECUTION_STORE_KEY = "vtdd:v3:executions";
 const CHAT_STORE_KEY = "vtdd:v3:chats";
+const REPOSITORY_STORE_KEY = "vtdd:v3:repositories";
 const NOTIFICATION_SETTINGS_KEY = "vtdd:v3:notification-settings";
 const PASSKEY_STORE_KEY = "vtdd:v3:passkeys";
 const PASSKEY_SESSION_PREFIX = "vtdd:v3:passkey-session:";
@@ -63,7 +65,7 @@ const forbiddenEventFields = [
   "privateKey"
 ];
 
-const allowedDispatchTaskTypes = ["implementation", "investigation", "docs", "tests", "review"];
+const allowedDispatchTaskTypes = ["conversation", "implementation", "investigation", "docs", "tests", "review"];
 const forbiddenDispatchTaskTypes = ["merge", "deploy", "close_issue", "credential", "dns", "delete"];
 const allowedChatStatuses = ["active", "pinned", "archived", "cold"];
 const forbiddenChatFields = ["rawTranscript", "rawLog", "terminalStream", "chainOfThought", "secret", "token", "approvalGrant", "approvalGrantId", "password", "privateKey"];
@@ -196,7 +198,35 @@ const issueCatalog = [
   { number: 18, title: "Codex Security を reviewer signal として取り込む", status: "planned" },
   { number: 19, title: "外部 repository onboarding と Butler repository read/develop readiness", status: "planned" },
   { number: 20, title: "GitHub App manifest から repository 用 app / installation を guided auto-provision する", status: "planned" },
-  { number: 23, title: "Butler voice persona と owner 呼称 onboarding", status: "planned" }
+  { number: 23, title: "Butler voice persona と owner 呼称 onboarding", status: "planned" },
+  { number: 32, title: "Repository registry と追加フォームを dashboard に追加する", status: "open" }
+];
+
+const sampleRepositories = [
+  {
+    id: "repo-marushu-vtdd-v3",
+    repository: "marushu/vtdd-v3",
+    nickname: "VTDD v3",
+    aliases: ["ぶい", "v3", "vtdd"],
+    pinnedAt: "2026-05-19T00:00:00.000Z",
+    readiness: "ready",
+    repoRead: "OK",
+    githubApp: "未確認",
+    runnerClone: "未確認",
+    notes: "v3 orchestrator repository"
+  },
+  {
+    id: "repo-marushu-vtdd-v2-p",
+    repository: "marushu/vtdd-v2-p",
+    nickname: "VTDD v2 public",
+    aliases: ["v2", "vtdd-v2-p"],
+    pinnedAt: null,
+    readiness: "observed",
+    repoRead: "OK",
+    githubApp: "未確認",
+    runnerClone: "未確認",
+    notes: "v2 runtime truth reference"
+  }
 ];
 
 export default {
@@ -204,10 +234,16 @@ export default {
     const url = new URL(request.url);
     const executions = await listExecutions(env);
     const chats = await listChats(env);
+    const repositories = await listRepositories(env);
     const notificationSettings = await getNotificationSettings(env);
 
-    if (url.pathname === "/" || url.pathname === "/orchestrator") {
-      return html(renderDashboard({ executions, chats, env, url }));
+    const assetResponse = renderStaticAsset(url.pathname);
+    if (assetResponse) {
+      return assetResponse;
+    }
+
+    if (isReactAppRoute(url.pathname)) {
+      return renderReactAppShell();
     }
 
     const repositoryChatsMatch = url.pathname.match(/^\/repositories\/([^/]+)\/([^/]+)\/chats$/);
@@ -264,6 +300,130 @@ export default {
 
     if (url.pathname === "/api/executions") {
       return json({ ok: true, executions });
+    }
+
+    if (url.pathname === "/api/repositories" && request.method === "GET") {
+      return json({ ok: true, repositories: buildRepositoryRegistry({ repositories, executions, chats }) });
+    }
+
+    if (url.pathname === "/api/repositories" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = addRepositoryRecord({ repositories, body, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      }, 201);
+    }
+
+    const pinMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/pin$/);
+    if (pinMatch && request.method === "POST") {
+      const repositoryId = decodeURIComponent(pinMatch[1]);
+      const result = setRepositoryPinned({ repositories, repositoryId, pinned: true, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      });
+    }
+
+    if (pinMatch && request.method === "DELETE") {
+      const repositoryId = decodeURIComponent(pinMatch[1]);
+      const result = setRepositoryPinned({ repositories, repositoryId, pinned: false, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      });
+    }
+
+    const repositoryDeleteMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)$/);
+    if (repositoryDeleteMatch && request.method === "DELETE") {
+      const repositoryId = decodeURIComponent(repositoryDeleteMatch[1]);
+      const result = deleteRepositoryRecord({ repositories, repositoryId, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 404);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        deleted: result.deleted,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      });
+    }
+
+    const readinessMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/readiness-check$/);
+    if (readinessMatch && request.method === "POST") {
+      const repositoryId = decodeURIComponent(readinessMatch[1]);
+      const result = await checkRepositoryReadiness({ env, repositories, repositoryId, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      });
+    }
+
+    const aliasMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/aliases$/);
+    if (aliasMatch && request.method === "POST") {
+      const repositoryId = decodeURIComponent(aliasMatch[1]);
+      const body = await readBody(request);
+      const result = addRepositoryAlias({ repositories, repositoryId, body, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      }, 201);
+    }
+
+    if (aliasMatch && request.method === "DELETE") {
+      const repositoryId = decodeURIComponent(aliasMatch[1]);
+      const body = await readBody(request);
+      const result = deleteRepositoryAlias({ repositories, repositoryId, body, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      });
+    }
+
+    const renameMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/nickname$/);
+    if (renameMatch && request.method === "PATCH") {
+      const repositoryId = decodeURIComponent(renameMatch[1]);
+      const body = await readBody(request);
+      const result = updateRepositoryNickname({ repositories, repositoryId, body, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      });
     }
 
     if (url.pathname.startsWith("/api/executions/")) {
@@ -383,6 +543,52 @@ export default {
       return json({ ok: true, chat: result.chat, message: result.message }, 201);
     }
 
+    const chatDispatchMatch = url.pathname.match(/^\/api\/chats\/([^/]+)\/dispatch$/);
+    if (chatDispatchMatch && request.method === "POST") {
+      const chatId = decodeURIComponent(chatDispatchMatch[1]);
+      const body = await readBody(request);
+      const result = buildChatFollowupDispatch({ chats, chatId, body, origin: url.origin });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      executions.unshift(result.execution);
+      await saveExecutions(env, executions);
+      await saveChats(env, chats);
+      return json({
+        ok: true,
+        intent: result.intent,
+        dispatch: result.queue,
+        execution: result.execution,
+        chat: result.chat,
+        message: result.message,
+        progressUrl: result.progressUrl,
+        chatUrl: `${url.origin}/chats/${encodeURIComponent(result.chat.chatId)}`
+      }, 202);
+    }
+
+    const chatConverseMatch = url.pathname.match(/^\/api\/chats\/([^/]+)\/converse$/);
+    if (chatConverseMatch && request.method === "POST") {
+      const chatId = decodeURIComponent(chatConverseMatch[1]);
+      const body = await readBody(request);
+      const result = buildChatConversationTurn({ chats, chatId, body, origin: url.origin });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      executions.unshift(result.execution);
+      await saveExecutions(env, executions);
+      await saveChats(env, chats);
+      return json({
+        ok: true,
+        intent: result.intent,
+        conversation: result.queue,
+        execution: result.execution,
+        chat: result.chat,
+        message: result.message,
+        progressUrl: result.progressUrl,
+        chatUrl: `${url.origin}/chats/${encodeURIComponent(result.chat.chatId)}`
+      }, 202);
+    }
+
     if (url.pathname.startsWith("/api/chats/")) {
       const chatId = decodeURIComponent(url.pathname.slice("/api/chats/".length));
       const chat = chats.find((item) => item.chatId === chatId);
@@ -470,6 +676,43 @@ export default {
       }, 202);
     }
 
+    if (url.pathname === "/api/butler/converse" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = buildButlerConversation({ body, origin: url.origin });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      executions.unshift(result.execution);
+      chats.unshift(result.chat);
+      await saveExecutions(env, executions);
+      await saveChats(env, chats);
+      return json({
+        ok: true,
+        intent: result.intent,
+        conversation: result.queue,
+        execution: result.execution,
+        chat: result.chat,
+        progressUrl: result.progressUrl,
+        chatUrl: result.chatUrl,
+        dashboardUrl: `${url.origin}/orchestrator`
+      }, 202);
+    }
+
+    if (url.pathname === "/api/butler/repository-alias" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = buildButlerRepositoryAliasMutation({ repositories, body, executions, chats });
+      if (!result.ok) {
+        return json(result, result.statusCode || 400);
+      }
+      await saveRepositories(env, repositories);
+      return json({
+        ok: true,
+        intent: result.intent,
+        repository: result.repository,
+        repositories: buildRepositoryRegistry({ repositories, executions, chats })
+      }, result.statusCode || 200);
+    }
+
     if (url.pathname === "/api/runner/queue" && request.method === "GET") {
       const limit = Math.max(1, Math.min(10, Number(url.searchParams.get("limit") || 5)));
       const queue = executions
@@ -532,6 +775,49 @@ async function listExecutions(env) {
   return sampleExecutions.map((execution) => ({ ...execution }));
 }
 
+function isReactAppRoute(pathname) {
+  if (new Set([
+    "/",
+    "/orchestrator",
+    "/repositories",
+    "/chats",
+    "/deploys",
+    "/decisions",
+    "/notifications/settings"
+  ]).has(pathname)) {
+    return true;
+  }
+
+  return pathname.startsWith("/chats/")
+    || /^\/repositories\/[^/]+$/.test(pathname)
+    || /^\/repositories\/[^/]+\/[^/]+\/chats$/.test(pathname);
+}
+
+function renderReactAppShell() {
+  const asset = staticAssets.get("/index.html");
+  if (!asset) {
+    return json({ ok: false, error: "react_shell_not_built" }, 500);
+  }
+  return new Response(asset.body, {
+    headers: {
+      "content-type": asset.contentType,
+      "cache-control": "no-store"
+    }
+  });
+}
+
+function renderStaticAsset(pathname) {
+  const asset = staticAssets.get(pathname);
+  if (!asset || pathname === "/index.html") return null;
+  const immutable = pathname.startsWith("/assets/");
+  return new Response(asset.body, {
+    headers: {
+      "content-type": asset.contentType,
+      "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache"
+    }
+  });
+}
+
 async function saveExecutions(env, executions) {
   const store = env?.EXECUTION_STORE;
   if (!store?.put) return false;
@@ -566,6 +852,36 @@ async function saveChats(env, chats) {
   const store = env?.EXECUTION_STORE;
   if (!store?.put) return false;
   await store.put(CHAT_STORE_KEY, JSON.stringify(chats.map(normalizeChat)));
+  return true;
+}
+
+async function listRepositories(env) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.get) {
+    return sampleRepositories.map(normalizeRepositoryRecord);
+  }
+
+  const raw = await store.get(REPOSITORY_STORE_KEY);
+  if (!raw) {
+    return sampleRepositories.map(normalizeRepositoryRecord);
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map(normalizeRepositoryRecord);
+    }
+  } catch {
+    return sampleRepositories.map(normalizeRepositoryRecord);
+  }
+
+  return sampleRepositories.map(normalizeRepositoryRecord);
+}
+
+async function saveRepositories(env, repositories) {
+  const store = env?.EXECUTION_STORE;
+  if (!store?.put) return false;
+  await store.put(REPOSITORY_STORE_KEY, JSON.stringify(repositories.map(normalizeRepositoryRecord)));
   return true;
 }
 
@@ -2102,6 +2418,10 @@ function buildDecisionItems(executions) {
     .filter((execution) => ["issue_close_review", "merge_review", "deploy_review", "investigate"].includes(execution.nextHumanAction))
     .map((execution) => ({
       executionId: execution.executionId,
+      repository: execution.repository,
+      issueNumber: execution.issueNumber,
+      title: execution.title,
+      action: execution.nextHumanAction,
       label: `${execution.repository} #${execution.issueNumber}: ${execution.nextHumanAction}`,
       reason: execution.currentStep,
       authority: authorityForNextAction(execution.nextHumanAction),
@@ -2259,6 +2579,399 @@ function buildRepositorySummaries(executions, chats = []) {
     .sort((a, b) => Date.parse(b.latestExecution?.lastUpdatedAt || 0) - Date.parse(a.latestExecution?.lastUpdatedAt || 0));
 }
 
+function buildRepositoryRegistry({ repositories, executions, chats }) {
+  const registered = new Map();
+  repositories.forEach((repository) => {
+    const record = normalizeRepositoryRecord(repository);
+    registered.set(record.id, {
+      ...record,
+      executionCount: 0,
+      chatCount: 0,
+      averageProgress: 0,
+      repositoryUrl: record.repository ? repositoryUrl(record.repository) : null,
+      chatUrl: record.repository ? repositoryChatsUrl(record.repository) : null
+    });
+  });
+
+  executions.forEach((execution) => {
+    const key = repositoryRecordId(execution.repository);
+    if (!registered.has(key)) {
+      const record = normalizeRepositoryRecord({
+        repository: execution.repository,
+        nickname: execution.repository,
+        readiness: "observed",
+        repoRead: "execution 由来",
+        githubApp: "未確認",
+        runnerClone: "未確認",
+        notes: "execution から自動検出"
+      });
+      registered.set(key, {
+        ...record,
+        executionCount: 0,
+        chatCount: 0,
+        averageProgress: 0,
+        repositoryUrl: record.repository ? repositoryUrl(record.repository) : null,
+        chatUrl: record.repository ? repositoryChatsUrl(record.repository) : null
+      });
+    }
+    const record = registered.get(key);
+    record.executionCount += 1;
+    record.progressTotal = (record.progressTotal || 0) + normalizeProgress(execution.progress);
+    record.averageProgress = Math.round(record.progressTotal / record.executionCount);
+  });
+
+  chats.forEach((chat) => {
+    const key = repositoryRecordId(chat.repository);
+    if (registered.has(key)) {
+      registered.get(key).chatCount += 1;
+    }
+  });
+
+  return [...registered.values()]
+    .map(({ progressTotal, ...record }) => record)
+    .sort(compareRepositoryRecords);
+}
+
+function compareRepositoryRecords(a, b) {
+  const aPinned = normalizeText(a.pinnedAt);
+  const bPinned = normalizeText(b.pinnedAt);
+  if (aPinned && bPinned) return Date.parse(aPinned) - Date.parse(bPinned);
+  if (aPinned) return -1;
+  if (bPinned) return 1;
+  return (a.nickname || a.repository || "").localeCompare(b.nickname || b.repository || "", "ja");
+}
+
+function addRepositoryRecord({ repositories, body, executions, chats }) {
+  const rawInput = normalizeText(body.repository || body.repositoryInput || body.name || body.nickname);
+  const repositoryCandidate = normalizeText(body.repository || body.repositoryInput);
+  const repository = /^[\w.-]+\/[\w.-]+$/.test(repositoryCandidate) ? repositoryCandidate : "";
+  const nickname = normalizeText(body.nickname || body.name || rawInput);
+  const aliases = normalizeAliasList(body.aliases);
+  if (!repository && !nickname) {
+    return { ok: false, error: "repository_or_nickname_required", statusCode: 400 };
+  }
+
+  const record = normalizeRepositoryRecord({
+    repository,
+    nickname,
+    aliases,
+    readiness: repository ? "unverified" : "unresolved",
+    repoRead: "未確認",
+    githubApp: "未確認",
+    runnerClone: "未確認",
+    notes: normalizeText(body.notes)
+  });
+  const existing = repositories.find((item) => normalizeRepositoryRecord(item).id === record.id);
+  if (existing) {
+    Object.assign(existing, {
+      ...normalizeRepositoryRecord(existing),
+      ...record,
+      readiness: normalizeRepositoryRecord(existing).readiness === "ready" ? "ready" : record.readiness,
+      aliases: mergeAliases(normalizeRepositoryRecord(existing), record),
+      repoRead: normalizeRepositoryRecord(existing).repoRead,
+      githubApp: normalizeRepositoryRecord(existing).githubApp,
+      runnerClone: normalizeRepositoryRecord(existing).runnerClone
+    });
+  } else {
+    if (record.repository) {
+      removeResolvedNicknameDuplicates(repositories, record);
+    }
+    repositories.unshift(record);
+  }
+  const registry = buildRepositoryRegistry({ repositories, executions, chats });
+  return {
+    ok: true,
+    repository: registry.find((item) => item.id === record.id) || record
+  };
+}
+
+function addRepositoryAlias({ repositories, repositoryId, body, executions, chats }) {
+  const id = normalizeText(repositoryId);
+  const index = repositories.findIndex((item) => normalizeRepositoryRecord(item).id === id);
+  if (index === -1) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const alias = normalizeText(body.alias || body.nickname || body.name);
+  if (!alias) {
+    return { ok: false, error: "alias_required", statusCode: 400 };
+  }
+  const record = normalizeRepositoryRecord(repositories[index]);
+  repositories[index] = {
+    ...record,
+    aliases: normalizeAliasList([...record.aliases, alias], record.nickname)
+  };
+  const registry = buildRepositoryRegistry({ repositories, executions, chats });
+  return {
+    ok: true,
+    repository: registry.find((item) => item.id === record.id) || repositories[index]
+  };
+}
+
+function setRepositoryPinned({ repositories, repositoryId, pinned, executions, chats }) {
+  const id = normalizeText(repositoryId);
+  const index = repositories.findIndex((item) => normalizeRepositoryRecord(item).id === id);
+  if (index === -1) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const record = normalizeRepositoryRecord(repositories[index]);
+  repositories[index] = {
+    ...record,
+    pinnedAt: pinned ? new Date().toISOString() : null
+  };
+  const registry = buildRepositoryRegistry({ repositories, executions, chats });
+  return {
+    ok: true,
+    repository: registry.find((item) => item.id === record.id) || repositories[index]
+  };
+}
+
+function deleteRepositoryAlias({ repositories, repositoryId, body, executions, chats }) {
+  const id = normalizeText(repositoryId);
+  const index = repositories.findIndex((item) => normalizeRepositoryRecord(item).id === id);
+  if (index === -1) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const alias = normalizeText(body.alias || body.nickname || body.name);
+  if (!alias) {
+    return { ok: false, error: "alias_required", statusCode: 400 };
+  }
+  const record = normalizeRepositoryRecord(repositories[index]);
+  repositories[index] = {
+    ...record,
+    aliases: record.aliases.filter((item) => item !== alias)
+  };
+  const registry = buildRepositoryRegistry({ repositories, executions, chats });
+  return {
+    ok: true,
+    repository: registry.find((item) => item.id === record.id) || repositories[index]
+  };
+}
+
+function updateRepositoryNickname({ repositories, repositoryId, body, executions, chats }) {
+  const id = normalizeText(repositoryId);
+  const index = repositories.findIndex((item) => normalizeRepositoryRecord(item).id === id);
+  if (index === -1) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const nickname = normalizeText(body.nickname || body.name);
+  if (!nickname) {
+    return { ok: false, error: "nickname_required", statusCode: 400 };
+  }
+  const record = normalizeRepositoryRecord(repositories[index]);
+  repositories[index] = {
+    ...record,
+    nickname,
+    aliases: normalizeAliasList([
+      ...record.aliases,
+      body.keepPrevious === false ? "" : record.nickname
+    ], nickname)
+  };
+  const registry = buildRepositoryRegistry({ repositories, executions, chats });
+  return {
+    ok: true,
+    repository: registry.find((item) => item.id === record.id) || repositories[index]
+  };
+}
+
+function buildButlerRepositoryAliasMutation({ repositories, body, executions, chats }) {
+  const message = normalizeText(body.message || body.text);
+  const action = normalizeAliasAction(body.action || message);
+  const alias = normalizeText(body.alias || extractQuotedValue(message));
+  const target = normalizeText(body.repository || body.repositoryInput || body.target || body.nickname);
+  if (!action) {
+    return { ok: false, error: "alias_action_required", statusCode: 400 };
+  }
+  if (!alias) {
+    return { ok: false, error: "alias_required", statusCode: 400 };
+  }
+  const record = resolveRepositoryRecord(repositories, target || message);
+  if (!record) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const mutation = action === "delete"
+    ? deleteRepositoryAlias({ repositories, repositoryId: record.id, body: { alias }, executions, chats })
+    : addRepositoryAlias({ repositories, repositoryId: record.id, body: { alias }, executions, chats });
+  if (!mutation.ok) return mutation;
+  return {
+    ok: true,
+    statusCode: action === "add" ? 201 : 200,
+    intent: {
+      action,
+      alias,
+      repositoryId: record.id,
+      repository: record.repository,
+      source: "butler_conversation"
+    },
+    repository: mutation.repository
+  };
+}
+
+function resolveRepositoryRecord(repositories, text) {
+  const normalized = normalizeText(text).toLowerCase();
+  if (!normalized) return null;
+  return repositories
+    .map(normalizeRepositoryRecord)
+    .find((record) => {
+      const candidates = [record.id, record.repository, record.nickname, ...record.aliases]
+        .map((value) => normalizeText(value).toLowerCase())
+        .filter(Boolean);
+      return candidates.some((candidate) => normalized === candidate || normalized.includes(candidate));
+    }) || null;
+}
+
+function normalizeAliasAction(value) {
+  const text = normalizeText(value);
+  if (/(remove|delete|消|削除|外し|外す)/i.test(text)) return "delete";
+  if (/(add|追加|登録|呼び|alias|nickname|ニックネーム|別名)/i.test(text)) return "add";
+  return "";
+}
+
+function extractQuotedValue(text) {
+  const match = normalizeText(text).match(/[「『\"']([^」』\"']+)[」』\"']/);
+  return match?.[1] || "";
+}
+
+function deleteRepositoryRecord({ repositories, repositoryId, executions, chats }) {
+  const id = normalizeText(repositoryId);
+  const index = repositories.findIndex((item) => normalizeRepositoryRecord(item).id === id);
+  if (index === -1) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const deleted = normalizeRepositoryRecord(repositories.splice(index, 1)[0]);
+  return {
+    ok: true,
+    deleted,
+    repositories: buildRepositoryRegistry({ repositories, executions, chats })
+  };
+}
+
+async function checkRepositoryReadiness({ env, repositories, repositoryId, executions, chats }) {
+  const id = normalizeText(repositoryId);
+  const recordIndex = repositories.findIndex((item) => normalizeRepositoryRecord(item).id === id);
+  if (recordIndex === -1) {
+    return { ok: false, error: "repository_not_found", statusCode: 404 };
+  }
+  const record = normalizeRepositoryRecord(repositories[recordIndex]);
+  if (!record.repository) {
+    return { ok: false, error: "repository_unresolved", statusCode: 409 };
+  }
+
+  const probe = await probeGithubRepository({ env, repository: record.repository });
+  const updated = normalizeRepositoryRecord({
+    ...record,
+    readiness: probe.ok ? "observed" : "unverified",
+    repoRead: probe.ok ? "OK" : "失敗",
+    githubApp: record.githubApp,
+    runnerClone: record.runnerClone,
+    notes: probe.ok
+      ? `${probe.visibility || "unknown"} repository。default branch: ${probe.defaultBranch || "unknown"}`
+      : probe.reason
+  });
+  repositories[recordIndex] = updated;
+  const registry = buildRepositoryRegistry({ repositories, executions, chats });
+  return {
+    ok: true,
+    repository: registry.find((item) => item.id === updated.id) || updated,
+    probe
+  };
+}
+
+async function probeGithubRepository({ env, repository }) {
+  const fixture = parseJsonEnv(env?.GITHUB_REPOSITORY_READINESS_FIXTURE);
+  if (fixture?.[repository]) {
+    return normalizeGithubRepositoryProbe(fixture[repository]);
+  }
+
+  const token = normalizeText(env?.GITHUB_TOKEN || env?.VTDD_GITHUB_TOKEN);
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "vtdd-v3-orchestrator"
+  };
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(`https://api.github.com/repos/${repository}`, { headers });
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      reason: response.status === 404 && !token
+        ? "GitHub repo を Worker から確認できません。private repo の場合は GitHub App / token が必要です。"
+        : `GitHub repo check failed: ${response.status}`
+    };
+  }
+  const body = await response.json().catch(() => ({}));
+  return normalizeGithubRepositoryProbe(body);
+}
+
+function normalizeGithubRepositoryProbe(value = {}) {
+  return {
+    ok: value.ok !== false,
+    visibility: normalizeText(value.visibility) || (value.private ? "private" : "public"),
+    defaultBranch: normalizeText(value.default_branch || value.defaultBranch),
+    htmlUrl: normalizeText(value.html_url || value.htmlUrl),
+    reason: normalizeText(value.reason)
+  };
+}
+
+function parseJsonEnv(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function removeResolvedNicknameDuplicates(repositories, record) {
+  const nickname = normalizeText(record.nickname).toLowerCase();
+  for (let index = repositories.length - 1; index >= 0; index -= 1) {
+    const current = normalizeRepositoryRecord(repositories[index]);
+    if (!current.repository && normalizeText(current.nickname).toLowerCase() === nickname) {
+      repositories.splice(index, 1);
+    }
+  }
+}
+
+function normalizeRepositoryRecord(record = {}) {
+  const repository = normalizeRepositoryInput(record.repository || "");
+  const nickname = normalizeText(record.nickname || record.name || repository);
+  const fallbackId = repository || nickname || "unknown";
+  return {
+    id: normalizeText(record.id) || repositoryRecordId(fallbackId),
+    repository: repository || null,
+    nickname,
+    aliases: normalizeAliasList(record.aliases, nickname),
+    pinnedAt: normalizeText(record.pinnedAt) || null,
+    readiness: normalizeText(record.readiness) || (repository ? "unverified" : "unresolved"),
+    repoRead: normalizeText(record.repoRead) || "未確認",
+    githubApp: normalizeText(record.githubApp) || "未確認",
+    runnerClone: normalizeText(record.runnerClone) || "未確認",
+    notes: normalizeText(record.notes)
+  };
+}
+
+function normalizeAliasList(value, nickname = "") {
+  const raw = Array.isArray(value) ? value : String(value || "").split(/[,\n]/);
+  const aliases = raw
+    .map(normalizeText)
+    .filter(Boolean)
+    .filter((alias) => alias !== normalizeText(nickname));
+  return [...new Set(aliases)];
+}
+
+function mergeAliases(existing, record) {
+  return normalizeAliasList([
+    ...existing.aliases,
+    ...record.aliases,
+    record.nickname
+  ], record.nickname);
+}
+
+function repositoryRecordId(value) {
+  return `repo-${normalizeText(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "unknown"}`;
+}
+
 function filterChats(chats, searchParams) {
   const repository = normalizeText(searchParams.get("repository"));
   const executionId = normalizeText(searchParams.get("executionId"));
@@ -2389,6 +3102,184 @@ function appendChatMessage(chats, chatId, body) {
   });
   chats[index] = chat;
   return { ok: true, chat, message };
+}
+
+function buildButlerConversation({ body, origin }) {
+  const intent = resolveButlerIntent({
+    ...body,
+    taskType: "conversation",
+    task: body.message || body.task
+  });
+  if (!intent.ok) return intent;
+  const dispatch = buildDispatchRecord({
+    body: {
+      repository: intent.repository,
+      issueNumber: intent.issueNumber,
+      branch: normalizeText(body.branch) || `codex/conversation-${intent.issueNumber || "adhoc"}`,
+      taskType: "conversation",
+      task: intent.task
+    },
+    origin
+  });
+  const chat = buildChatRecord({
+    repository: intent.repository,
+    issueNumber: intent.issueNumber,
+    executionId: dispatch.execution.executionId,
+    title: normalizeText(body.title) || `Butler conversation: ${intent.task.slice(0, 72)}`,
+    status: "active",
+    summary: "Butler / VPS Codex CLI と会話し、Issue 候補・RAG 候補・実装 queue へ進めるための開発チャットです。",
+    message: intent.message,
+    tags: ["butler", "conversation", "vtdd"]
+  });
+  return {
+    ok: true,
+    intent,
+    execution: {
+      ...dispatch.execution,
+      currentStep: "Queued conversational turn for VPS Codex CLI. Runner should answer in this chat before implementation.",
+      returnThreadUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`,
+      notifications: mergeNotifications(dispatch.execution.notifications, ["Conversation turn queued. Butler should respond before implementation."])
+    },
+    queue: {
+      ...dispatch.queue,
+      mode: "conversation",
+      expectedOutputs: ["butler_reply", "issue_candidate", "rag_candidate", "implementation_dispatch_when_ready"]
+    },
+    progressUrl: dispatch.progressUrl,
+    chat,
+    chatUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`
+  };
+}
+
+function buildChatConversationTurn({ chats, chatId, body, origin }) {
+  const index = chats.findIndex((chat) => chat.chatId === chatId);
+  if (index < 0) {
+    return { ok: false, error: "chat_not_found", chatId, statusCode: 404 };
+  }
+  const currentChat = chats[index];
+  const intent = resolveButlerIntent({
+    ...body,
+    repository: currentChat.repository,
+    issueNumber: body.issueNumber || currentChat.issueNumber,
+    taskType: "conversation",
+    message: body.message || body.text
+  });
+  if (!intent.ok) return intent;
+
+  const dispatch = buildDispatchRecord({
+    body: {
+      repository: intent.repository,
+      issueNumber: intent.issueNumber,
+      branch: normalizeText(body.branch) || `codex/conversation-${intent.issueNumber || "adhoc"}`,
+      taskType: "conversation",
+      task: intent.task
+    },
+    origin
+  });
+  const now = new Date().toISOString();
+  const message = normalizeChatMessage({
+    role: normalizeText(body.role) || "owner",
+    text: intent.message,
+    createdAt: now
+  });
+  const systemMessage = normalizeChatMessage({
+    role: "butler",
+    text: `会話ターンを VPS Codex CLI に渡しました: ${dispatch.execution.executionId}`,
+    createdAt: now
+  });
+  const chat = normalizeChat({
+    ...currentChat,
+    executionId: dispatch.execution.executionId,
+    status: "active",
+    lastMessage: systemMessage.text,
+    updatedAt: now,
+    tags: mergeTags(currentChat.tags, ["conversation"]),
+    messages: [...(currentChat.messages || []), message, systemMessage]
+  });
+  chats[index] = chat;
+  return {
+    ok: true,
+    intent,
+    execution: {
+      ...dispatch.execution,
+      currentStep: `Queued conversational follow-up from chat ${chat.chatId}.`,
+      returnThreadUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`,
+      notifications: mergeNotifications(dispatch.execution.notifications, ["Existing chat received a conversational follow-up."])
+    },
+    queue: {
+      ...dispatch.queue,
+      mode: "conversation",
+      expectedOutputs: ["butler_reply", "issue_candidate", "rag_candidate", "implementation_dispatch_when_ready"]
+    },
+    progressUrl: dispatch.progressUrl,
+    chat,
+    message: systemMessage
+  };
+}
+
+function buildChatFollowupDispatch({ chats, chatId, body, origin }) {
+  const index = chats.findIndex((chat) => chat.chatId === chatId);
+  if (index < 0) {
+    return { ok: false, error: "chat_not_found", chatId, statusCode: 404 };
+  }
+  const currentChat = chats[index];
+  const intent = resolveButlerIntent({
+    ...body,
+    repository: currentChat.repository,
+    issueNumber: body.issueNumber || currentChat.issueNumber,
+    message: body.message || body.text
+  });
+  if (!intent.ok) return intent;
+
+  const branch = normalizeText(body.branch) || `codex/issue-${intent.issueNumber || "adhoc"}`;
+  const dispatch = buildDispatchRecord({
+    body: {
+      repository: intent.repository,
+      issueNumber: intent.issueNumber,
+      branch,
+      taskType: intent.taskType,
+      task: intent.task
+    },
+    origin
+  });
+  const now = new Date().toISOString();
+  const message = normalizeChatMessage({
+    role: normalizeText(body.role) || "owner",
+    text: intent.message,
+    createdAt: now
+  });
+  const systemMessage = normalizeChatMessage({
+    role: "butler",
+    text: `追加指示を runner queue に入れました: ${dispatch.execution.executionId}`,
+    createdAt: now
+  });
+  const chat = normalizeChat({
+    ...currentChat,
+    executionId: dispatch.execution.executionId,
+    status: "active",
+    lastMessage: systemMessage.text,
+    updatedAt: now,
+    messages: [...(currentChat.messages || []), message, systemMessage]
+  });
+  chats[index] = chat;
+  return {
+    ok: true,
+    intent,
+    execution: {
+      ...dispatch.execution,
+      currentStep: `Queued follow-up from chat ${chat.chatId}.`,
+      returnThreadUrl: `${origin}/chats/${encodeURIComponent(chat.chatId)}`,
+      notifications: mergeNotifications(dispatch.execution.notifications, ["Existing chat received a queued follow-up instruction."])
+    },
+    queue: dispatch.queue,
+    progressUrl: dispatch.progressUrl,
+    chat,
+    message: systemMessage
+  };
+}
+
+function mergeTags(existing = [], tags = []) {
+  return [...new Set([...normalizeStringList(existing), ...normalizeStringList(tags)])];
 }
 
 function buildChatRecord(body) {

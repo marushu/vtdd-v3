@@ -4,15 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "test": "npm run build:assets && node --test",
+    "build": "vite build",
+    "build:assets": "vite build && node scripts/build-static-assets.mjs",
     "dev": "wrangler dev src/worker.js",
-    "deploy": "wrangler deploy src/worker.js",
+    "deploy": "npm run build:assets && wrangler deploy src/worker.js",
     "runner:once": "node scripts/vps-codex-runner.mjs"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "vite": "^8.0.13",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^13.3.0"
+    "@simplewebauthn/server": "^13.3.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   }
 }
