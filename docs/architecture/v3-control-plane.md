@@ -59,6 +59,14 @@ Repository は registry / allowlist 上で扱い、Butler は nickname / owner-r
 
 Repository ごとに `read_ready`, `write_ready`, `runner_ready`, `auth_missing`, `install_missing`, `clone_missing`, `blocked` を表示する。
 
+## GitHub App Guided Auto-Provision
+
+他 repository 指定時に必要な GitHub App / installation / permission / secret が不足している場合、VTDD は guided auto-provision を提案する。
+
+VTDD は manifest preview、permission diff、install target、secret destination、risk、rollback note を表示する。GO + passkey 後に GitHub App manifest flow URL を発行し、GitHub owner/admin の承認画面へ送る。
+
+GitHub から返る temporary code は manifest conversion に使う。生成される private key、client secret、webhook secret は dashboard / logs / RAG に表示しない。
+
 ## Samidare Backlog
 
 五月雨で出た追加構想は `docs/roadmap/samidare-backlog.md` に固定する。

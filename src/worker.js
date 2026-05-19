@@ -167,7 +167,8 @@ const issueCatalog = [
   { number: 16, title: "chat / execution の realtime 更新", status: "planned" },
   { number: 17, title: "同一 repository 並行開発の conflict-aware scheduler", status: "planned" },
   { number: 18, title: "Codex Security を reviewer signal として取り込む", status: "planned" },
-  { number: 19, title: "外部 repository onboarding と Butler repository read/develop readiness", status: "planned" }
+  { number: 19, title: "外部 repository onboarding と Butler repository read/develop readiness", status: "planned" },
+  { number: 20, title: "GitHub App manifest から repository 用 app / installation を guided auto-provision する", status: "planned" }
 ];
 
 export default {

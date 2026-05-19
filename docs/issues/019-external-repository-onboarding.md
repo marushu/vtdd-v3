@@ -15,6 +15,7 @@ Butler が対象 repository を安全に解決し、GitHub truth を読み、Iss
 - Butler が owner の自然言語 repository nickname / owner/repo / URL から対象 repo を解決できる。
 - 未許可 repository は読まない / 実行しない。
 - GitHub App installation がない場合、readiness に `install_missing` を表示し、GO + passkey が必要な setup 導線に流す。
+- 必要 app / permission / installation が不足している場合、#20 の GitHub App guided auto-provision に接続できる。
 - runner workspace に clone がない場合、`clone_missing` として表示し、clone / fetch setup を governed runner setup に流す。
 - Issue / PR / checks / branches / default branch / open PR overlap を runtime truth として読める。
 - 対象 repo の AGENTS.md / README / package metadata / test command candidates を startup context として読める。

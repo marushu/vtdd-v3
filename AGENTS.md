@@ -16,6 +16,8 @@ Product goal は、オーナーが ChatGPT thread history を source of truth �
 - VTDD v3 は VTDD repo 自体だけでなく、owner の他 repository を開発するための orchestrator である。
 - Butler は repository registry / allowlist / GitHub App installation / runner clone readiness を確認してから他 repository を読む、または実行する。
 - 未許可 repository、GitHub App 未install、runner clone 未準備の repository は実行せず、readiness gap として dashboard に表示する。
+- GitHub App 作成 / install / permission mutation / secret sync は guided auto-provision として扱い、GO + passkey と GitHub owner/admin の承認画面なしに実行しない。
+- GitHub App private key、client secret、webhook secret は dashboard / logs / RAG に表示しない。
 - `OPENAI_API_KEY` / API-key billing mode は default 禁止。明示承認なしに runner へ渡さない。
 - runner auth mode は dashboard に `browser_chatgpt`, `chatgpt_codex_cli`, `api_key`, `local_tool_only`, `unknown` として表示できるようにする。
 - 高リスク操作には明示的な GO + real passkey が必要。

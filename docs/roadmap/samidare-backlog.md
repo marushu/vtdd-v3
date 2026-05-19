@@ -44,6 +44,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - #17 同一 repository 並行開発の conflict-aware scheduler。
 - #18 Codex Security reviewer signal。
 - #19 外部 repository onboarding と Butler repository read/develop readiness。
+- #20 GitHub App guided auto-provision。
 
 既存 Issue では以下も未完了のまま残る。
 
@@ -61,6 +62,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - Codex Security は VTDD 内で再実装せず、GitHub repository に接続された external reviewer signal として取り込む。
 - Codex Security が有料 / plan 外 / quota reached の場合は使わず、reviewer unavailable として表示する。
 - VTDD v3 は VTDD repo 自体だけでなく、owner の他 repository を開発するための orchestrator である。
+- 他 repository に必要な GitHub App / permission / installation は、GO + passkey と GitHub owner/admin 承認を通した guided auto-provision で作る。
 - mac Codex は emergency / bootstrap / auxiliary surface に寄せる。
 - chat は ChatGPT thread ではなく VTDD 側の durable work room として扱う。
 - 音声入力は即実行ではなく、確認可能な text intent に変換する。
@@ -78,6 +80,7 @@ ChatGPT thread の記憶だけに置かず、GitHub Issue / docs / dashboard Iss
 - 同一 repository の並行開発は conflict-aware scheduler を通し、危ない場合は queue / dry-run / human decision に回す。
 - `OPENAI_API_KEY` / API key billing mode は明示承認、budget cap、dashboard cost risk 表示なしに使わない。
 - 未許可 repository、GitHub App 未install、runner clone 未準備の repository は実行せず readiness として表示する。
+- GitHub App private key、client secret、webhook secret は dashboard / logs / RAG に表示しない。
 
 ## 次の推奨順
 
